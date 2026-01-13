@@ -11,11 +11,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/VeltarosLabs/Veltaros/internal/blockchain"
 	"github.com/VeltarosLabs/Veltaros/internal/config"
 	"github.com/VeltarosLabs/Veltaros/internal/logging"
 	"github.com/VeltarosLabs/Veltaros/internal/p2p"
+	"github.com/VeltarosLabs/Veltaros/internal/storage"
 	"github.com/VeltarosLabs/Veltaros/pkg/version"
 )
+
+type nodeRuntime struct {
+	startedAt time.Time
+	chain     *blockchain.Chain
+	store     *storage.Store
+	p2p       *p2p.Node
+}
 
 func main() {
 	parsed, err := config.ParseNodeFlags(os.Args[1:])
@@ -28,6 +37,13 @@ func main() {
 		Level:  cfg.Log.Level,
 		Format: cfg.Log.Format,
 	})
+
+	store, err := storage.New(cfg.Storage.DataDir)
+	if err != nil {
+		os.Exit(exitWithError(err))
+	}
+
+	chain := blockchain.New()
 
 	p2pNode, err := p2p.New(p2p.Config{
 		ListenAddr:       cfg.Network.ListenAddr,
@@ -46,9 +62,16 @@ func main() {
 	}
 	defer func() { _ = p2pNode.Close() }()
 
+	rt := &nodeRuntime{
+		startedAt: time.Now().UTC(),
+		chain:     chain,
+		store:     store,
+		p2p:       p2pNode,
+	}
+
 	var apiSrv *http.Server
 	if cfg.API.Enabled {
-		apiSrv = startAPI(log, cfg.API.ListenAddr)
+		apiSrv = startAPI(log, cfg.API.ListenAddr, rt)
 		defer func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
@@ -61,20 +84,35 @@ func main() {
 	log.Info("shutdown complete")
 }
 
-func startAPI(log *slog.Logger, listen string) *http.Server {
+func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
+		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":   true,
 			"time": time.Now().UTC().Format(time.RFC3339Nano),
 		})
 	})
 
 	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(version.Get())
+		writeJSON(w, http.StatusOK, version.Get())
+	})
+
+	mux.HandleFunc("/status", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"startedAt": rt.startedAt.Format(time.RFC3339Nano),
+			"uptimeSec": int64(time.Since(rt.startedAt).Seconds()),
+			"peers":     rt.p2p.PeerCount(),
+			"height":    rt.chain.Height(),
+			"dataDir":   rt.store.DataDir,
+		})
+	})
+
+	mux.HandleFunc("/peers", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count": rt.p2p.PeerCount(),
+			"peers": rt.p2p.Peers(),
+		})
 	})
 
 	srv := &http.Server{
@@ -98,7 +136,6 @@ func startAPI(log *slog.Logger, listen string) *http.Server {
 
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Minimal safe defaults for an internal node API.
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -107,16 +144,20 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
 func waitForShutdown(log *slog.Logger) {
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-
 	s := <-ch
 	log.Info("shutdown signal received", "signal", s.String())
 }
 
 func exitWithError(err error) int {
-	// Ensure human-friendly output even if logger fails early.
 	_, _ = os.Stderr.WriteString("veltaros-node error: " + err.Error() + "\n")
 	return 1
 }
