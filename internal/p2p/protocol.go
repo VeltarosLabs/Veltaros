@@ -14,13 +14,6 @@ import (
 	"github.com/VeltarosLabs/Veltaros/pkg/version"
 )
 
-// Production-minded protocol baseline:
-// - Length-prefixed framing with strict max size.
-// - Versioned HELLO handshake with network ID and node identity.
-// - Replay-resistant nonce + timestamp.
-// - Ed25519 identity key (public key shared in HELLO).
-// - Handshake has strict deadlines and validation.
-
 const (
 	MaxFrameSize = 1 << 20 // 1 MiB
 
@@ -30,7 +23,6 @@ const (
 	ProtocolVersion uint16 = 1
 )
 
-// MessageType identifies message category.
 type MessageType uint8
 
 const (
@@ -124,10 +116,6 @@ func ReadFrame(r io.Reader) (Frame, error) {
 // [8] unixTimeSec (int64)
 // [32] nonce
 // [32] ed25519 public key
-//
-// Notes:
-// - No signature yet; next phase will add signed hello or challenge-response.
-// - Validation: protocolVersion match, networkID match, timestamp skew bounded, nonce non-zero, pubkey length exact.
 
 const (
 	maxHelloString = 64
@@ -299,7 +287,6 @@ func DecodeHello(b []byte) (Hello, error) {
 	copy(pubKey, pub)
 
 	if off != len(b) {
-		// Strict parsing.
 		return Hello{}, errors.New("hello payload has trailing bytes")
 	}
 
@@ -352,9 +339,11 @@ func ValidateHello(h Hello, rules HelloValidation) error {
 	return nil
 }
 
+func PublicKeyHex(pub ed25519.PublicKey) string {
+	return hex.EncodeToString(pub)
+}
+
 func sanitizeHelloString(s string) string {
-	// Keep it simple and deterministic. Trim whitespace and remove NUL.
-	s = string([]byte(s))
 	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
 		s = s[1:]
 	}
@@ -366,11 +355,6 @@ func sanitizeHelloString(s string) string {
 		}
 		break
 	}
-	s = removeNulls(s)
-	return s
-}
-
-func removeNulls(s string) string {
 	b := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
 		if s[i] != 0 {
@@ -380,6 +364,80 @@ func removeNulls(s string) string {
 	return string(b)
 }
 
-func PublicKeyHex(pub ed25519.PublicKey) string {
-	return hex.EncodeToString(pub)
+// ---- PEERS payload ----
+//
+// Simple binary format:
+// [2] count (uint16)
+// repeated count times:
+//   [2] addrLen (uint16) + [addrLen] addr bytes (utf-8), addrLen <= 128
+//
+// This is intentionally compact and deterministic.
+
+const maxPeerAddrLen = 128
+
+func EncodePeers(addrs []string) ([]byte, error) {
+	if len(addrs) > 4096 {
+		addrs = addrs[:4096]
+	}
+	buf := make([]byte, 0, 2+len(addrs)*16)
+	tmp2 := make([]byte, 2)
+	binary.LittleEndian.PutUint16(tmp2, uint16(len(addrs)))
+	buf = append(buf, tmp2...)
+
+	for _, a := range addrs {
+		a = sanitizeHelloString(a)
+		if a == "" || len(a) > maxPeerAddrLen {
+			continue
+		}
+		binary.LittleEndian.PutUint16(tmp2, uint16(len(a)))
+		buf = append(buf, tmp2...)
+		buf = append(buf, []byte(a)...)
+	}
+	return buf, nil
+}
+
+func DecodePeers(b []byte) ([]string, error) {
+	if len(b) < 2 {
+		return nil, errors.New("peers payload too short")
+	}
+	off := 0
+	count := int(binary.LittleEndian.Uint16(b[off : off+2]))
+	off += 2
+	if count < 0 || count > 4096 {
+		return nil, errors.New("invalid peers count")
+	}
+
+	out := make([]string, 0, count)
+	seen := make(map[string]struct{}, count)
+
+	for i := 0; i < count; i++ {
+		if off+2 > len(b) {
+			return nil, io.ErrUnexpectedEOF
+		}
+		n := int(binary.LittleEndian.Uint16(b[off : off+2]))
+		off += 2
+		if n <= 0 || n > maxPeerAddrLen {
+			return nil, errors.New("invalid peer addr length")
+		}
+		if off+n > len(b) {
+			return nil, io.ErrUnexpectedEOF
+		}
+		addr := string(b[off : off+n])
+		off += n
+		addr = sanitizeHelloString(addr)
+		if addr == "" {
+			continue
+		}
+		if _, ok := seen[addr]; ok {
+			continue
+		}
+		seen[addr] = struct{}{}
+		out = append(out, addr)
+	}
+
+	if off != len(b) {
+		return nil, errors.New("peers payload has trailing bytes")
+	}
+
+	return out, nil
 }

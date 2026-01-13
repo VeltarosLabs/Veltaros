@@ -24,8 +24,11 @@ type NetworkConfig struct {
 	MaxPeers         int
 	DialTimeout      time.Duration
 	HandshakeTimeout time.Duration
-	NetworkID        string
-	IdentityKeyPath  string
+
+	NetworkID       string
+	IdentityKeyPath string
+	BanlistPath     string
+	PeerStorePath   string
 }
 
 type APIConfig struct {
@@ -54,8 +57,11 @@ func Default() Config {
 			MaxPeers:         64,
 			DialTimeout:      7 * time.Second,
 			HandshakeTimeout: 7 * time.Second,
-			NetworkID:        "veltaros-mainnet",
-			IdentityKeyPath:  "data/node/identity.key",
+
+			NetworkID:       "veltaros-mainnet",
+			IdentityKeyPath: "data/node/identity.key",
+			BanlistPath:     "data/node/banlist.json",
+			PeerStorePath:   "data/node/peers.json",
 		},
 		API: APIConfig{
 			Enabled:      true,
@@ -92,6 +98,8 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 
 		networkID   = fs.String("p2p.network", envOr("VELTAROS_NETWORK_ID", cfg.Network.NetworkID), "Network ID (e.g. veltaros-mainnet, veltaros-testnet)")
 		identityKey = fs.String("p2p.identityKey", envOr("VELTAROS_IDENTITY_KEY", cfg.Network.IdentityKeyPath), "Path to node identity private key (ed25519, hex)")
+		banlistPath = fs.String("p2p.banlist", envOr("VELTAROS_BANLIST_PATH", cfg.Network.BanlistPath), "Path to banlist JSON file")
+		peerStore   = fs.String("p2p.peerStore", envOr("VELTAROS_PEERSTORE_PATH", cfg.Network.PeerStorePath), "Path to known peers JSON file")
 
 		apiEnabled = fs.Bool("api.enabled", envOrBool("VELTAROS_API_ENABLED", cfg.API.Enabled), "Enable HTTP API")
 		apiListen  = fs.String("api.listen", envOr("VELTAROS_API_LISTEN", cfg.API.ListenAddr), "HTTP API listen address (ip:port)")
@@ -111,6 +119,8 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 	cfg.Network.MaxPeers = *maxPeers
 	cfg.Network.NetworkID = strings.TrimSpace(*networkID)
 	cfg.Network.IdentityKeyPath = strings.TrimSpace(*identityKey)
+	cfg.Network.BanlistPath = strings.TrimSpace(*banlistPath)
+	cfg.Network.PeerStorePath = strings.TrimSpace(*peerStore)
 
 	cfg.API.Enabled = *apiEnabled
 	cfg.API.ListenAddr = strings.TrimSpace(*apiListen)
@@ -141,6 +151,12 @@ func validate(cfg Config) error {
 	}
 	if cfg.Network.IdentityKeyPath == "" {
 		return errors.New("p2p.identityKey must not be empty")
+	}
+	if cfg.Network.BanlistPath == "" {
+		return errors.New("p2p.banlist must not be empty")
+	}
+	if cfg.Network.PeerStorePath == "" {
+		return errors.New("p2p.peerStore must not be empty")
 	}
 
 	switch strings.ToLower(cfg.Log.Level) {

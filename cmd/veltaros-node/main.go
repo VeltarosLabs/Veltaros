@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -62,8 +63,12 @@ func main() {
 		MaxPeers:         cfg.Network.MaxPeers,
 		DialTimeout:      cfg.Network.DialTimeout,
 		HandshakeTimeout: cfg.Network.HandshakeTimeout,
-		NetworkID:        cfg.Network.NetworkID,
-		IdentityPrivKey:  identityPriv,
+
+		NetworkID:       cfg.Network.NetworkID,
+		IdentityPrivKey: identityPriv,
+
+		BanlistPath:   cfg.Network.BanlistPath,
+		PeerStorePath: cfg.Network.PeerStorePath,
 	}, log)
 	if err != nil {
 		os.Exit(exitWithError(err))
@@ -93,7 +98,6 @@ func main() {
 	}
 
 	waitForShutdown(log)
-
 	log.Info("shutdown complete")
 }
 
@@ -113,12 +117,14 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"networkID": rt.networkID,
-			"startedAt": rt.startedAt.Format(time.RFC3339Nano),
-			"uptimeSec": int64(time.Since(rt.startedAt).Seconds()),
-			"peers":     rt.p2p.PeerCount(),
-			"height":    rt.chain.Height(),
-			"dataDir":   rt.store.DataDir,
+			"networkID":   rt.networkID,
+			"startedAt":   rt.startedAt.Format(time.RFC3339Nano),
+			"uptimeSec":   int64(time.Since(rt.startedAt).Seconds()),
+			"peers":       rt.p2p.PeerCount(),
+			"knownPeers":  rt.p2p.KnownPeerCount(),
+			"bannedPeers": rt.p2p.BanCount(),
+			"height":      rt.chain.Height(),
+			"dataDir":     rt.store.DataDir,
 		})
 	})
 
@@ -177,11 +183,9 @@ func exitWithError(err error) int {
 }
 
 // Identity key file format: hex-encoded ed25519 private key (64 bytes).
-// Stored at config p2p.identityKey (default: data/node/identity.key).
 func loadOrCreateIdentityKey(path string) (ed25519.PrivateKey, error) {
 	if b, err := os.ReadFile(path); err == nil {
-		s := string(b)
-		s = trimSpaceASCII(s)
+		s := trimSpaceASCII(string(b))
 		raw, err := hex.DecodeString(s)
 		if err != nil {
 			return nil, errors.New("invalid identity key hex")
@@ -192,12 +196,11 @@ func loadOrCreateIdentityKey(path string) (ed25519.PrivateKey, error) {
 		return ed25519.PrivateKey(raw), nil
 	}
 
-	// Create new
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 
-	_, priv, err := ed25519.GenerateKey(nil)
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +214,6 @@ func loadOrCreateIdentityKey(path string) (ed25519.PrivateKey, error) {
 		return nil, err
 	}
 	_ = os.Chmod(path, 0o600)
-
 	return priv, nil
 }
 
