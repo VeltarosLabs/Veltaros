@@ -28,13 +28,18 @@ type MessageType uint8
 const (
 	MsgUnknown MessageType = 0
 
-	MsgHello   MessageType = 1
-	MsgPing    MessageType = 2
-	MsgPong    MessageType = 3
+	MsgHello MessageType = 1
+	MsgPing  MessageType = 2
+	MsgPong  MessageType = 3
+
 	MsgGoodbye MessageType = 4
 
 	MsgGetPeers MessageType = 10
 	MsgPeers    MessageType = 11
+
+	// Challenge-response proof of key ownership
+	MsgChallenge     MessageType = 20
+	MsgChallengeResp MessageType = 21
 )
 
 type Frame struct {
@@ -108,7 +113,6 @@ func ReadFrame(r io.Reader) (Frame, error) {
 }
 
 // ---- HELLO handshake payload (v1) ----
-//
 // Payload fields (binary, little-endian for ints):
 // [2] protocolVersion (uint16)
 // [2] networkIDLen (uint16) + [N] networkID bytes (utf-8, <= 64)
@@ -365,13 +369,8 @@ func sanitizeHelloString(s string) string {
 }
 
 // ---- PEERS payload ----
-//
-// Simple binary format:
 // [2] count (uint16)
-// repeated count times:
-//   [2] addrLen (uint16) + [addrLen] addr bytes (utf-8), addrLen <= 128
-//
-// This is intentionally compact and deterministic.
+// repeated count times: [2] addrLen (uint16) + [addrLen] addr bytes (utf-8), addrLen <= 128
 
 const maxPeerAddrLen = 128
 
@@ -440,4 +439,71 @@ func DecodePeers(b []byte) ([]string, error) {
 	}
 
 	return out, nil
+}
+
+// ---- Challenge-response signing ----
+//
+// Challenge payload: [32] random bytes
+// Response payload: [32] challenge bytes + [64] ed25519 signature
+//
+// Signature message = SHA256( "veltaros-p2p-challenge" || networkID || challengeBytes )
+//
+// This binds proof to a specific network ID and prevents cross-network reuse.
+
+const (
+	challengeSize     = 32
+	challengeSigSize  = ed25519.SignatureSize
+	challengeRespSize = challengeSize + challengeSigSize
+)
+
+func NewChallenge() ([challengeSize]byte, error) {
+	var c [challengeSize]byte
+	_, err := rand.Read(c[:])
+	return c, err
+}
+
+func ChallengeMessage(networkID string, challenge [challengeSize]byte) [32]byte {
+	// domain separation + bind network ID
+	domain := []byte("veltaros-p2p-challenge")
+	msg := make([]byte, 0, len(domain)+len(networkID)+challengeSize)
+	msg = append(msg, domain...)
+	msg = append(msg, []byte(networkID)...)
+	msg = append(msg, challenge[:]...)
+	return vcrypto.Sha256(msg)
+}
+
+func SignChallenge(identityPriv ed25519.PrivateKey, networkID string, challenge [challengeSize]byte) ([]byte, error) {
+	if len(identityPriv) != ed25519.PrivateKeySize {
+		return nil, errors.New("invalid identity private key size")
+	}
+	h := ChallengeMessage(networkID, challenge)
+	sig := ed25519.Sign(identityPriv, h[:])
+
+	out := make([]byte, 0, challengeRespSize)
+	out = append(out, challenge[:]...)
+	out = append(out, sig...)
+	return out, nil
+}
+
+func VerifyChallengeResp(pub ed25519.PublicKey, networkID string, resp []byte, expected [challengeSize]byte) error {
+	if len(pub) != ed25519.PublicKeySize {
+		return errors.New("invalid public key size")
+	}
+	if len(resp) != challengeRespSize {
+		return errors.New("invalid challenge response size")
+	}
+
+	var gotChallenge [challengeSize]byte
+	copy(gotChallenge[:], resp[:challengeSize])
+
+	if !vcrypto.ConstantTimeEqual(gotChallenge[:], expected[:]) {
+		return errors.New("challenge mismatch")
+	}
+
+	sig := resp[challengeSize:]
+	h := ChallengeMessage(networkID, expected)
+	if !ed25519.Verify(pub, h[:], sig) {
+		return errors.New("invalid challenge signature")
+	}
+	return nil
 }
