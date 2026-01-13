@@ -1,0 +1,79 @@
+# Path: .gitignore
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+.idea/
+*.iml
+
+# --- Go ---
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build artifacts
+*.out
+*.test
+*.prof
+*.pprof
+*.coverprofile
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Vendor (uncomment if you vendor dependencies)
+# vendor/
+
+# --- Logs / Runtime ---
+*.log
+logs/
+tmp/
+temp/
+*.pid
+
+# --- Security / Secrets ---
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+private/
+wallets/
+keys/
+
+# --- Node / Web ---
+web/node_modules/
+web/.pnp/
+web/.pnp.js
+web/npm-debug.log*
+web/yarn-debug.log*
+web/yarn-error.log*
+web/pnpm-debug.log*
+
+# Build outputs
+web/dist/
+web/build/
+web/.next/
+web/out/
+
+# Vercel
+web/.vercel/
+
+# Cache
+web/.cache/
+web/.turbo/
