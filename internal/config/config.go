@@ -24,6 +24,8 @@ type NetworkConfig struct {
 	MaxPeers         int
 	DialTimeout      time.Duration
 	HandshakeTimeout time.Duration
+	NetworkID        string
+	IdentityKeyPath  string
 }
 
 type APIConfig struct {
@@ -52,6 +54,8 @@ func Default() Config {
 			MaxPeers:         64,
 			DialTimeout:      7 * time.Second,
 			HandshakeTimeout: 7 * time.Second,
+			NetworkID:        "veltaros-mainnet",
+			IdentityKeyPath:  "data/node/identity.key",
 		},
 		API: APIConfig{
 			Enabled:      true,
@@ -86,6 +90,9 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 		bootstrap    = fs.String("p2p.bootstrap", envOr("VELTAROS_P2P_BOOTSTRAP", ""), "Comma-separated bootstrap peers (host:port,host:port,...)")
 		maxPeers     = fs.Int("p2p.maxPeers", envOrInt("VELTAROS_P2P_MAXPEERS", cfg.Network.MaxPeers), "Maximum connected peers")
 
+		networkID   = fs.String("p2p.network", envOr("VELTAROS_NETWORK_ID", cfg.Network.NetworkID), "Network ID (e.g. veltaros-mainnet, veltaros-testnet)")
+		identityKey = fs.String("p2p.identityKey", envOr("VELTAROS_IDENTITY_KEY", cfg.Network.IdentityKeyPath), "Path to node identity private key (ed25519, hex)")
+
 		apiEnabled = fs.Bool("api.enabled", envOrBool("VELTAROS_API_ENABLED", cfg.API.Enabled), "Enable HTTP API")
 		apiListen  = fs.String("api.listen", envOr("VELTAROS_API_LISTEN", cfg.API.ListenAddr), "HTTP API listen address (ip:port)")
 
@@ -102,6 +109,9 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 	cfg.Network.ListenAddr = strings.TrimSpace(*listenAddr)
 	cfg.Network.ExternalAddr = strings.TrimSpace(*externalAddr)
 	cfg.Network.MaxPeers = *maxPeers
+	cfg.Network.NetworkID = strings.TrimSpace(*networkID)
+	cfg.Network.IdentityKeyPath = strings.TrimSpace(*identityKey)
+
 	cfg.API.Enabled = *apiEnabled
 	cfg.API.ListenAddr = strings.TrimSpace(*apiListen)
 	cfg.Log.Level = strings.TrimSpace(*logLevel)
@@ -109,8 +119,7 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 	cfg.Storage.DataDir = strings.TrimSpace(*dataDir)
 
 	if b := strings.TrimSpace(*bootstrap); b != "" {
-		parts := splitCSV(b)
-		cfg.Network.BootstrapPeers = parts
+		cfg.Network.BootstrapPeers = splitCSV(b)
 	}
 
 	if err := validate(cfg); err != nil {
@@ -126,6 +135,12 @@ func validate(cfg Config) error {
 	}
 	if cfg.Network.MaxPeers <= 0 || cfg.Network.MaxPeers > 4096 {
 		return fmt.Errorf("p2p.maxPeers out of range: %d", cfg.Network.MaxPeers)
+	}
+	if cfg.Network.NetworkID == "" {
+		return errors.New("p2p.network must not be empty")
+	}
+	if cfg.Network.IdentityKeyPath == "" {
+		return errors.New("p2p.identityKey must not be empty")
 	}
 
 	switch strings.ToLower(cfg.Log.Level) {
@@ -143,11 +158,9 @@ func validate(cfg Config) error {
 	if cfg.API.Enabled && cfg.API.ListenAddr == "" {
 		return errors.New("api.listen must not be empty when api.enabled=true")
 	}
-
 	if cfg.Storage.DataDir == "" {
 		return errors.New("data.dir must not be empty")
 	}
-
 	return nil
 }
 

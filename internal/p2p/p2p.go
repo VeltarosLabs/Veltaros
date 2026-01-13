@@ -3,11 +3,14 @@ package p2p
 import (
 	"bufio"
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"log/slog"
 	"net"
 	"sync"
 	"time"
+
+	vcrypto "github.com/VeltarosLabs/Veltaros/internal/crypto"
 )
 
 type Config struct {
@@ -17,12 +20,17 @@ type Config struct {
 	MaxPeers         int
 	DialTimeout      time.Duration
 	HandshakeTimeout time.Duration
+
+	NetworkID       string
+	IdentityPrivKey ed25519.PrivateKey
 }
 
 type PeerInfo struct {
-	RemoteAddr  string `json:"remoteAddr"`
-	Inbound     bool   `json:"inbound"`
-	ConnectedAt int64  `json:"connectedAt"`
+	RemoteAddr   string `json:"remoteAddr"`
+	Inbound      bool   `json:"inbound"`
+	ConnectedAt  int64  `json:"connectedAt"`
+	PublicKeyHex string `json:"publicKeyHex"`
+	NodeVersion  string `json:"nodeVersion"`
 }
 
 type Node struct {
@@ -41,6 +49,10 @@ type peerConn struct {
 	conn        net.Conn
 	inbound     bool
 	connectedAt time.Time
+
+	pubKey      ed25519.PublicKey
+	nodeVersion string
+	helloNonce  [32]byte
 }
 
 func New(cfg Config, log *slog.Logger) (*Node, error) {
@@ -58,6 +70,12 @@ func New(cfg Config, log *slog.Logger) (*Node, error) {
 	}
 	if cfg.HandshakeTimeout <= 0 {
 		cfg.HandshakeTimeout = 7 * time.Second
+	}
+	if cfg.NetworkID == "" {
+		return nil, errors.New("NetworkID is required")
+	}
+	if len(cfg.IdentityPrivKey) != ed25519.PrivateKeySize {
+		return nil, errors.New("IdentityPrivKey is required (ed25519)")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,9 +95,10 @@ func (n *Node) Start() error {
 	}
 	n.ln = ln
 
-	n.log.Info("p2p listening", "addr", n.cfg.ListenAddr, "external", n.cfg.ExternalAddr, "maxPeers", n.cfg.MaxPeers)
+	n.log.Info("p2p listening", "addr", n.cfg.ListenAddr, "external", n.cfg.ExternalAddr, "maxPeers", n.cfg.MaxPeers, "networkID", n.cfg.NetworkID)
 
 	go n.acceptLoop()
+	go n.bootstrapLoop()
 
 	return nil
 }
@@ -99,7 +118,6 @@ func (n *Node) Close() error {
 		_ = n.ln.Close()
 	}
 
-	// Close peers
 	n.mu.Lock()
 	for k, p := range n.peers {
 		_ = p.conn.Close()
@@ -124,9 +142,11 @@ func (n *Node) Peers() []PeerInfo {
 	out := make([]PeerInfo, 0, len(n.peers))
 	for _, p := range n.peers {
 		out = append(out, PeerInfo{
-			RemoteAddr:  p.conn.RemoteAddr().String(),
-			Inbound:     p.inbound,
-			ConnectedAt: p.connectedAt.UTC().Unix(),
+			RemoteAddr:   p.conn.RemoteAddr().String(),
+			Inbound:      p.inbound,
+			ConnectedAt:  p.connectedAt.UTC().Unix(),
+			PublicKeyHex: PublicKeyHex(p.pubKey),
+			NodeVersion:  p.nodeVersion,
 		})
 	}
 	return out
@@ -154,6 +174,73 @@ func (n *Node) acceptLoop() {
 	}
 }
 
+func (n *Node) bootstrapLoop() {
+	// Best-effort dialing; safe and bounded. We’ll add backoff/jitter and peer discovery next.
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	// Initial immediate attempt
+	n.tryBootstrapOnce()
+
+	for {
+		select {
+		case <-n.ctx.Done():
+			return
+		case <-ticker.C:
+			n.tryBootstrapOnce()
+		}
+	}
+}
+
+func (n *Node) tryBootstrapOnce() {
+	for _, addr := range n.cfg.BootstrapPeers {
+		addr := addr
+		if addr == "" {
+			continue
+		}
+		if n.isConnectedTo(addr) {
+			continue
+		}
+		go n.dialPeer(addr)
+	}
+}
+
+func (n *Node) isConnectedTo(addr string) bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	// addr may be "host:port". Our key is conn.RemoteAddr().String() which might differ.
+	// For bootstrap we only need a coarse guard: if any peer has same remote string.
+	for _, p := range n.peers {
+		if p.conn.RemoteAddr().String() == addr {
+			return true
+		}
+	}
+	return false
+}
+
+func (n *Node) dialPeer(addr string) {
+	select {
+	case <-n.ctx.Done():
+		return
+	default:
+	}
+
+	dialer := &net.Dialer{Timeout: n.cfg.DialTimeout}
+	conn, err := dialer.DialContext(n.ctx, "tcp", addr)
+	if err != nil {
+		n.log.Debug("dial failed", "addr", addr, "err", err)
+		return
+	}
+
+	if !n.tryRegisterPeer(conn, false) {
+		_ = conn.Close()
+		return
+	}
+
+	n.handleConn(conn, false)
+}
+
 func (n *Node) tryRegisterPeer(conn net.Conn, inbound bool) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -177,6 +264,21 @@ func (n *Node) tryRegisterPeer(conn net.Conn, inbound bool) bool {
 	return true
 }
 
+func (n *Node) setPeerHello(conn net.Conn, h Hello) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	key := conn.RemoteAddr().String()
+	p, ok := n.peers[key]
+	if !ok {
+		return
+	}
+	p.pubKey = h.PublicKey
+	p.nodeVersion = h.NodeVersion
+	p.helloNonce = h.Nonce
+	n.peers[key] = p
+}
+
 func (n *Node) unregisterPeer(conn net.Conn) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -194,38 +296,50 @@ func (n *Node) handleConn(conn net.Conn, inbound bool) {
 		n.unregisterPeer(conn)
 	}()
 
-	// Defensive timeouts
-	_ = conn.SetDeadline(time.Now().Add(n.cfg.HandshakeTimeout))
-
-	// Minimal safe handshake placeholder: require a valid framed message (MsgHello)
-	// We will expand to version negotiation, network ID, and node identity next.
 	br := bufio.NewReaderSize(conn, 64*1024)
 	bw := bufio.NewWriterSize(conn, 64*1024)
 
-	frame, err := ReadFrame(br)
-	if err != nil {
-		n.log.Warn("handshake failed (read)", "remote", conn.RemoteAddr().String(), "err", err)
-		return
-	}
-	if frame.Type != MsgHello {
-		n.log.Warn("handshake failed (type)", "remote", conn.RemoteAddr().String(), "type", frame.Type)
-		return
+	_ = conn.SetDeadline(time.Now().Add(n.cfg.HandshakeTimeout))
+
+	// Handshake:
+	// - Outbound: send HELLO then expect HELLO back.
+	// - Inbound: expect HELLO then send HELLO.
+	if inbound {
+		peerHello, err := n.readAndValidateHello(br)
+		if err != nil {
+			n.log.Warn("handshake failed (inbound read hello)", "remote", conn.RemoteAddr().String(), "err", err)
+			return
+		}
+		if err := n.writeHello(bw); err != nil {
+			n.log.Warn("handshake failed (inbound write hello)", "remote", conn.RemoteAddr().String(), "err", err)
+			return
+		}
+		if err := bw.Flush(); err != nil {
+			n.log.Warn("handshake failed (inbound flush)", "remote", conn.RemoteAddr().String(), "err", err)
+			return
+		}
+		n.setPeerHello(conn, peerHello)
+	} else {
+		if err := n.writeHello(bw); err != nil {
+			n.log.Warn("handshake failed (outbound write hello)", "remote", conn.RemoteAddr().String(), "err", err)
+			return
+		}
+		if err := bw.Flush(); err != nil {
+			n.log.Warn("handshake failed (outbound flush)", "remote", conn.RemoteAddr().String(), "err", err)
+			return
+		}
+		peerHello, err := n.readAndValidateHello(br)
+		if err != nil {
+			n.log.Warn("handshake failed (outbound read hello)", "remote", conn.RemoteAddr().String(), "err", err)
+			return
+		}
+		n.setPeerHello(conn, peerHello)
 	}
 
-	// Reply with Pong-style ack (temporary)
-	if err := WriteFrame(bw, MsgPong, []byte("ok")); err != nil {
-		n.log.Warn("handshake failed (write)", "remote", conn.RemoteAddr().String(), "err", err)
-		return
-	}
-	if err := bw.Flush(); err != nil {
-		n.log.Warn("handshake failed (flush)", "remote", conn.RemoteAddr().String(), "err", err)
-		return
-	}
-
-	// Clear handshake deadline; set read/write deadlines per message in future
+	// Clear handshake deadline
 	_ = conn.SetDeadline(time.Time{})
 
-	// Connection loop (for now, we only support Ping and Goodbye to keep it safe)
+	// Connection loop
 	for {
 		select {
 		case <-n.ctx.Done():
@@ -251,8 +365,48 @@ func (n *Node) handleConn(conn net.Conn, inbound bool) {
 		case MsgGoodbye:
 			return
 		default:
-			// Unknown messages are ignored for now (future: penalize/misbehavior scoring)
 			n.log.Debug("ignored message", "remote", conn.RemoteAddr().String(), "type", f.Type)
 		}
 	}
+}
+
+func (n *Node) writeHello(bw *bufio.Writer) error {
+	pub := n.cfg.IdentityPrivKey.Public().(ed25519.PublicKey)
+	h, err := NewHello(n.cfg.NetworkID, pub)
+	if err != nil {
+		return err
+	}
+	payload, err := h.Encode()
+	if err != nil {
+		return err
+	}
+	return WriteFrame(bw, MsgHello, payload)
+}
+
+func (n *Node) readAndValidateHello(br *bufio.Reader) (Hello, error) {
+	frame, err := ReadFrame(br)
+	if err != nil {
+		return Hello{}, err
+	}
+	if frame.Type != MsgHello {
+		return Hello{}, errors.New("expected HELLO")
+	}
+	h, err := DecodeHello(frame.Payload)
+	if err != nil {
+		return Hello{}, err
+	}
+	if err := ValidateHello(h, HelloValidation{
+		NetworkID:      n.cfg.NetworkID,
+		MaxClockSkew:   2 * time.Minute,
+		RequireNonZero: true,
+	}); err != nil {
+		return Hello{}, err
+	}
+
+	// Ensure peer isn't claiming our exact identity (simple self-connection guard).
+	ourPub := n.cfg.IdentityPrivKey.Public().(ed25519.PublicKey)
+	if vcrypto.ConstantTimeEqual(ourPub, h.PublicKey) {
+		return Hello{}, errors.New("peer has same identity public key")
+	}
+	return h, nil
 }
