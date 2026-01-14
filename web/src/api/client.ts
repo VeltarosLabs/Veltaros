@@ -1,4 +1,5 @@
 import type { Health, NodeStatus, PeerList, VersionInfo } from "./types";
+import type { MempoolResponse } from "./mempoolTypes";
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -37,8 +38,8 @@ export class VeltarosApiClient {
         return this.getJson<PeerList>("/peers", signal);
     }
 
-    async mempool(signal?: AbortSignal): Promise<unknown> {
-        return this.getJson<unknown>("/mempool", signal);
+    async mempool(signal?: AbortSignal): Promise<MempoolResponse> {
+        return this.getJson<MempoolResponse>("/mempool", signal);
     }
 
     async txValidate(body: unknown, signal?: AbortSignal): Promise<unknown> {
