@@ -128,14 +128,25 @@ a {
     border: 1px solid var(--border);
     background: var(--btn);
     color: var(--text);
+    cursor: pointer;
 }
 
 .btn:hover {
     background: var(--btnHover);
 }
 
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .btn.primary {
     background: rgba(255, 255, 255, 0.14);
+}
+
+.btn.danger {
+    background: rgba(251, 113, 133, 0.14);
+    border-color: rgba(251, 113, 133, 0.3);
 }
 
 .cards {
@@ -209,6 +220,34 @@ a {
 .kv .value {
     text-align: right;
     color: var(--text);
+}
+
+.label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-top: 0.75rem;
+    color: var(--muted);
+}
+
+.input {
+    padding: 0.65rem 0.75rem;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    outline: none;
+}
+
+.input:focus {
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.rowBtns {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+    flex-wrap: wrap;
 }
 
 .tableWrap {
