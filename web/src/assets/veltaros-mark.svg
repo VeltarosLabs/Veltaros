@@ -1,0 +1,16 @@
+<svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="300"
+    height="300"
+    viewBox="0 0 300 300"
+    preserveAspectRatio="xMidYMid meet"
+>
+    <!-- Embed the logo image -->
+    <image
+        href="../src/assets/logo.png"
+        x="0"
+        y="0"
+        width="300"
+        height="300"
+    />
+</svg>
