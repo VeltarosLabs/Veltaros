@@ -111,7 +111,7 @@ func main() {
 func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 	mux := http.NewServeMux()
 
-	txLimiter := api.NewLimiter(2.0, 10.0, 1.0) // ~2 req/sec with burst 10, per IP
+	txLimiter := api.NewLimiter(2.0, 10.0, 1.0)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -176,7 +176,18 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
+
+		last := rt.chain.LastNonce(tx.Draft.From)
+		expected := rt.chain.ExpectedNonce(tx.Draft.From)
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            true,
+			"txId":          tx.TxID,
+			"from":          tx.Draft.From,
+			"lastNonce":     last,
+			"expectedNonce": expected,
+			"mempoolHas":    rt.chain.MempoolHas(tx.TxID),
+		})
 	})
 
 	mux.HandleFunc("/tx/broadcast", func(w http.ResponseWriter, r *http.Request) {
@@ -195,10 +206,33 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			return
 		}
 
+		if err := blockchain.ValidateSignedTx(tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		// De-dup
+		if rt.chain.MempoolHas(tx.TxID) {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID, "note": "already in mempool"})
+			return
+		}
+
+		// Nonce policy (strictly increasing per address)
+		if !rt.chain.ReserveNonce(tx.Draft.From, tx.Draft.Nonce) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":            false,
+				"error":         "nonce too low (replay or out-of-order)",
+				"lastNonce":     rt.chain.LastNonce(tx.Draft.From),
+				"expectedNonce": rt.chain.ExpectedNonce(tx.Draft.From),
+			})
+			return
+		}
+
 		if err := rt.chain.MempoolAdd(tx); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
+
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
 	})
 
