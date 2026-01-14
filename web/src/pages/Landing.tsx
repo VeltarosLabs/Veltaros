@@ -1,49 +1,49 @@
 import React from "react";
-import { Link } from "react-router-dom";
 import Card from "../components/Card";
 import logoUrl from "../assets/veltaros-mark.svg";
+import { Link } from "react-router-dom";
 
 export default function Landing(): React.ReactElement {
     return (
         <section className="page">
             <div className="hero">
                 <div className="heroLeft">
-                    <div className="heroBadge">
-                        <span className="pill">Decentralized Currency</span>
-                        <span className="pill mutedPill">Go Core • React UI</span>
+                    <div className="badgeRow">
+                        <span className="pill">Veltaros Network</span>
+                        <span className="pill subtle">Secure • Fast • Transparent</span>
                     </div>
 
                     <h1 className="heroTitle">
                         Veltaros
-                        <span className="heroTitleSub"> — a production-minded blockchain ecosystem</span>
+                        <span className="heroTitleSub"> — modern decentralized digital currency</span>
                     </h1>
 
                     <p className="heroSubtitle">
-                        Full-stack implementation: Go-based node (P2P, consensus, ledger) and a modern web interface for wallet and
-                        network visibility.
+                        A full-stack blockchain ecosystem: a node that powers the network and a clean wallet experience designed for
+                        real-world use.
                     </p>
 
                     <div className="heroActions">
                         <Link className="btn primary" to="/wallet">
                             Open Wallet
                         </Link>
-                        <a className="btn" href="https://github.com/VeltarosLabs" target="_blank" rel="noreferrer noopener">
-                            View on GitHub
+                        <a className="btn" href="#features">
+                            Explore Features
                         </a>
                     </div>
 
                     <div className="heroStats">
                         <div className="stat">
-                            <div className="statK">Security-first</div>
-                            <div className="statV">Handshake, scoring, rate limits</div>
+                            <div className="statK">Network</div>
+                            <div className="statV">Peer discovery, handshake verification, scoring</div>
                         </div>
                         <div className="stat">
-                            <div className="statK">Clean architecture</div>
-                            <div className="statV">Modular Go + typed TS client</div>
+                            <div className="statK">Wallet</div>
+                            <div className="statV">Local encrypted vault, signed transactions</div>
                         </div>
                         <div className="stat">
-                            <div className="statK">Deploy-ready</div>
-                            <div className="statV">Vercel frontend, local node API</div>
+                            <div className="statK">Security</div>
+                            <div className="statV">Strict validation, rate-limiting, resilient defaults</div>
                         </div>
                     </div>
                 </div>
@@ -51,55 +51,54 @@ export default function Landing(): React.ReactElement {
                 <div className="heroRight" aria-hidden="true">
                     <div className="heroMarkWrap">
                         <img className="heroMark" src={logoUrl} alt="" />
-                        <div className="heroMarkGlow" />
+                        <div className="heroGlow" />
                     </div>
                 </div>
             </div>
 
-            <div className="sectionHeader">
-                <h2>Explore</h2>
-                <p className="muted">Pick where you want to go.</p>
+            <div id="features" className="sectionHeader">
+                <h2>What you can do</h2>
+                <p className="muted">Choose where you want to start.</p>
             </div>
 
-            <div className="gridCards">
-                <Card
-                    title="Wallet"
-                    subtitle="Create / unlock a local encrypted wallet vault, draft & sign transactions."
-                    actions={<Link className="btn small primary" to="/wallet">Open</Link>}
-                >
+            <div className="cardGrid">
+                <Card title="Wallet" subtitle="Create and manage your local wallet, then sign transactions.">
                     <ul className="list">
-                        <li>Local encryption (PBKDF2 + AES-GCM)</li>
-                        <li>Address checksum validation</li>
-                        <li>Signed tx draft + node validate/broadcast</li>
+                        <li>Encrypted vault (password protected)</li>
+                        <li>Receive address with copy action</li>
+                        <li>Draft, sign, validate, broadcast transactions</li>
                     </ul>
+                    <div className="cardActions">
+                        <Link className="btn small primary" to="/wallet">
+                            Open Wallet
+                        </Link>
+                    </div>
                 </Card>
 
-                <Card
-                    title="Node & Network"
-                    subtitle="View node status, peers, and mempool in real-time."
-                    actions={<Link className="btn small" to="/wallet">View</Link>}
-                >
+                <Card title="Network" subtitle="View the node’s view of the network and transaction pool.">
                     <ul className="list">
-                        <li>P2P identity + challenge-response handshake</li>
-                        <li>Peer discovery, backoff/jitter, banlist</li>
-                        <li>HTTP status endpoints for operations</li>
+                        <li>Peer list with verification and scoring</li>
+                        <li>Mempool viewer</li>
+                        <li>Live node status</li>
                     </ul>
+                    <div className="cardActions">
+                        <Link className="btn small" to="/wallet">
+                            Open Network View
+                        </Link>
+                    </div>
                 </Card>
 
-                <Card
-                    title="Developer"
-                    subtitle="Go module, clean repo structure, MIT license."
-                    actions={
-                        <a className="btn small" href="https://github.com/VeltarosLabs/Veltaros" target="_blank" rel="noreferrer noopener">
-                            Repo
-                        </a>
-                    }
-                >
+                <Card title="Transactions" subtitle="A clean workflow from draft to broadcast.">
                     <ul className="list">
-                        <li>Go core: internal/ + cmd/ layout</li>
-                        <li>Typed API client patterns</li>
-                        <li>Production-minded defaults</li>
+                        <li>Checksum address validation</li>
+                        <li>Signing confirmation modal</li>
+                        <li>Local transaction history</li>
                     </ul>
+                    <div className="cardActions">
+                        <Link className="btn small" to="/wallet">
+                            Go to Transactions
+                        </Link>
+                    </div>
                 </Card>
             </div>
         </section>

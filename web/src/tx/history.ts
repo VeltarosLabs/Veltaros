@@ -3,7 +3,7 @@ import type { SignedTx } from "./types";
 const KEY = "veltaros.tx.history.v1";
 
 export type TxHistoryItem = {
-    id: string; // txId
+    id: string;
     createdAt: string;
     status: "drafted" | "validated" | "broadcast" | "error";
     note?: string;

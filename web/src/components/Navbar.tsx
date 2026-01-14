@@ -1,59 +1,57 @@
-import React, { useMemo, useState } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Link, NavLink } from "react-router-dom";
+import ThemeToggle from "./ThemeToggle";
 import logoUrl from "../assets/veltaros-mark.svg";
 
-const links = {
-    github: "https://github.com/VeltarosLabs",
-    x: "https://x.com/veltaros",
-    reddit: "https://www.reddit.com/r/Veltaros/"
+type Props = {
+    theme: "light" | "dark";
+    onToggleTheme: () => void;
 };
 
-export default function Navbar(): React.ReactElement {
-    const [open, setOpen] = useState(false);
-    const loc = useLocation();
+const navLinks = [
+    { to: "/", label: "Home" },
+    { to: "/wallet", label: "Wallet" }
+];
 
-    useMemo(() => {
-        setOpen(false);
-        return null;
-    }, [loc.pathname]);
+export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElement {
+    const [open, setOpen] = useState(false);
+
+    useEffect(() => {
+        const onResize = () => {
+            if (window.innerWidth > 720) setOpen(false);
+        };
+        window.addEventListener("resize", onResize);
+        return () => window.removeEventListener("resize", onResize);
+    }, []);
 
     return (
         <header className="nav">
             <div className="navInner">
-                <Link to="/" className="brand" aria-label="Veltaros home">
-                    <img className="brandLogo" src={logoUrl} alt="Veltaros" />
+                <Link to="/" className="brand" aria-label="Veltaros">
+                    <img className="brandLogo" src={logoUrl} alt="Veltaros logo" />
                     <span className="brandText">Veltaros</span>
                 </Link>
 
-                <button
-                    type="button"
-                    className="navToggle"
-                    aria-label={open ? "Close menu" : "Open menu"}
-                    aria-expanded={open}
-                    onClick={() => setOpen((v) => !v)}
-                >
-                    <span className="navToggleBars" />
-                </button>
+                <div className="navRight">
+                    <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+
+                    <button
+                        type="button"
+                        className="navToggle"
+                        aria-label={open ? "Close menu" : "Open menu"}
+                        aria-expanded={open}
+                        onClick={() => setOpen((v) => !v)}
+                    >
+                        <span className={`bars ${open ? "open" : ""}`.trim()} />
+                    </button>
+                </div>
 
                 <nav className={`navLinks ${open ? "open" : ""}`.trim()} aria-label="Primary navigation">
-                    <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
-                        Home
-                    </NavLink>
-                    <NavLink to="/wallet" className={({ isActive }) => (isActive ? "active" : "")}>
-                        Wallet
-                    </NavLink>
-
-                    <div className="navDivider" />
-
-                    <a href={links.github} target="_blank" rel="noreferrer noopener">
-                        GitHub
-                    </a>
-                    <a href={links.x} target="_blank" rel="noreferrer noopener">
-                        X
-                    </a>
-                    <a href={links.reddit} target="_blank" rel="noreferrer noopener">
-                        Reddit
-                    </a>
+                    {navLinks.map((l) => (
+                        <NavLink key={l.to} to={l.to} end={l.to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>
+                            {l.label}
+                        </NavLink>
+                    ))}
                 </nav>
             </div>
         </header>

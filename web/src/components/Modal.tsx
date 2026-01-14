@@ -14,6 +14,7 @@ export default function Modal({ open, title, children, onClose }: Props): React.
         const onKey = (e: KeyboardEvent) => {
             if (e.key === "Escape") onClose();
         };
+
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
     }, [open, onClose]);

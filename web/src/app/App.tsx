@@ -1,13 +1,18 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import Navbar from "../components/Navbar";
 import Landing from "../pages/Landing";
 import Wallet from "../pages/Wallet";
-import Navbar from "../components/Navbar";
+import SocialLinks from "../components/SocialLinks";
+import { useTheme } from "../hooks/useTheme";
 
 export default function App(): React.ReactElement {
+    const { theme, toggle } = useTheme();
+
     return (
         <div className="app">
-            <Navbar />
+            <Navbar theme={theme} onToggleTheme={toggle} />
+
             <main className="container main">
                 <Routes>
                     <Route path="/" element={<Landing />} />
@@ -18,8 +23,12 @@ export default function App(): React.ReactElement {
 
             <footer className="footer">
                 <div className="footerInner">
-                    <span>© {new Date().getFullYear()} VeltarosLabs</span>
-                    <span className="muted">MIT Licensed</span>
+                    <div>
+                        <div className="footerTitle">Veltaros</div>
+                        <div className="footerSub">Decentralized currency ecosystem</div>
+                    </div>
+
+                    <SocialLinks />
                 </div>
             </footer>
         </div>

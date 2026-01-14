@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { env } from "../config/env";
 import { VeltarosApiClient } from "../api/client";
 import type { NodeStatus, PeerList } from "../api/types";
+import type { MempoolResponse } from "../api/mempoolTypes";
 import { usePoll } from "../hooks/usePoll";
 import { useWallet } from "../wallet/useWallet";
 import Card from "../components/Card";
@@ -11,7 +12,6 @@ import type { TxDraft, SignedTx } from "../tx/types";
 import { signDraft } from "../tx/sign";
 import { validateAddress } from "../tx/address";
 import { clearHistory, loadHistory, upsertHistory, type TxHistoryItem } from "../tx/history";
-import type { MempoolResponse } from "../api/mempoolTypes";
 
 type Section = "vault" | "tx" | "network";
 
@@ -54,7 +54,7 @@ export default function Wallet(): React.ReactElement {
     const [pwd, setPwd] = useState("");
     const [pwd2, setPwd2] = useState("");
 
-    // Tx draft
+    // Tx
     const [txTo, setTxTo] = useState("");
     const [txAmount, setTxAmount] = useState("1000");
     const [txFee, setTxFee] = useState("10");
@@ -69,7 +69,6 @@ export default function Wallet(): React.ReactElement {
 
     // History
     const [history, setHistory] = useState<TxHistoryItem[]>(() => loadHistory());
-
     const refreshHistory = () => setHistory(loadHistory());
 
     const showError = (e: unknown) => setMsg(e instanceof Error ? e.message : "Unknown error");
@@ -114,7 +113,7 @@ export default function Wallet(): React.ReactElement {
 
     const onReset = () => {
         setMsg(null);
-        if (confirm("This will permanently delete the local wallet vault from this browser. Continue?")) {
+        if (confirm("Delete the local wallet vault from this browser? This cannot be undone.")) {
             actions.reset();
             setSigned(null);
             setTxResult(null);
@@ -125,8 +124,8 @@ export default function Wallet(): React.ReactElement {
         setMsg(null);
         try {
             await copyToClipboard(text);
-            setMsg("Copied to clipboard");
-            setTimeout(() => setMsg(null), 1500);
+            setMsg("Copied");
+            setTimeout(() => setMsg(null), 1200);
         } catch {
             setMsg("Clipboard copy failed");
         }
@@ -137,17 +136,17 @@ export default function Wallet(): React.ReactElement {
         setTxResult(null);
 
         if (wallet.status !== "unlocked") {
-            setMsg("Unlock wallet first");
+            setMsg("Unlock your wallet first");
             return;
         }
         if (!status.data) {
-            setMsg("Node status not available yet");
+            setMsg("Node status is not ready yet");
             return;
         }
 
         const to = txTo.trim();
         if (!(await validateAddress(to))) {
-            setMsg("Recipient address is invalid (checksum failed or wrong length)");
+            setMsg("Recipient address is invalid");
             return;
         }
 
@@ -156,7 +155,7 @@ export default function Wallet(): React.ReactElement {
         const nonce = Number(txNonce);
 
         if (!Number.isFinite(amount) || amount <= 0) {
-            setMsg("Invalid amount");
+            setMsg("Amount must be greater than 0");
             return;
         }
         if (!Number.isFinite(fee) || fee < 1) {
@@ -164,15 +163,15 @@ export default function Wallet(): React.ReactElement {
             return;
         }
         if (fee > amount) {
-            setMsg("Fee must be <= amount");
+            setMsg("Fee must be less than or equal to amount");
             return;
         }
         if (!Number.isFinite(nonce) || nonce <= 0) {
-            setMsg("Invalid nonce");
+            setMsg("Nonce must be greater than 0");
             return;
         }
         if (txMemo.length > 256) {
-            setMsg("Memo too long (max 256)");
+            setMsg("Memo is too long (max 256)");
             return;
         }
 
@@ -186,11 +185,10 @@ export default function Wallet(): React.ReactElement {
         setTxResult(null);
 
         try {
-            if (wallet.status !== "unlocked") throw new Error("Unlock wallet first");
-            if (!status.data) throw new Error("Node status not available yet");
+            if (wallet.status !== "unlocked") throw new Error("Unlock your wallet first");
+            if (!status.data) throw new Error("Node status is not ready yet");
 
             const to = txTo.trim();
-
             const { privateKey, publicKeyRaw } = await actions.exportKeysForSigning(signPwd);
 
             const draft: TxDraft = {
@@ -208,35 +206,25 @@ export default function Wallet(): React.ReactElement {
             const stx = await signDraft(draft, publicKeyRaw, privateKey);
             setSigned(stx);
 
-            const item: TxHistoryItem = {
+            const base: TxHistoryItem = {
                 id: stx.txId,
                 createdAt: new Date().toISOString(),
                 status: "drafted",
                 tx: stx
             };
-            upsertHistory(item);
+            upsertHistory(base);
             refreshHistory();
 
             const res = await api.txValidate(stx);
             setTxResult(JSON.stringify(res, null, 2));
 
-            upsertHistory({ ...item, status: "validated", note: "Validated by node" });
+            upsertHistory({ ...base, status: "validated", note: "Validated by node" });
             refreshHistory();
 
             setSignOpen(false);
             setSignPwd("");
         } catch (e) {
             showError(e);
-            if (signed?.txId) {
-                upsertHistory({
-                    id: signed.txId,
-                    createdAt: new Date().toISOString(),
-                    status: "error",
-                    note: e instanceof Error ? e.message : "Unknown error",
-                    tx: signed
-                });
-                refreshHistory();
-            }
         } finally {
             setBusy(false);
         }
@@ -254,7 +242,7 @@ export default function Wallet(): React.ReactElement {
                 id: signed.txId,
                 createdAt: new Date().toISOString(),
                 status: "broadcast",
-                note: "Broadcast accepted by node (mempool)",
+                note: "Accepted by node mempool",
                 tx: signed
             });
             refreshHistory();
@@ -291,82 +279,47 @@ export default function Wallet(): React.ReactElement {
 
             <Tabs items={tabs} value={section} onChange={setSection} />
 
-            {msg && <div className={`alert ${msg.startsWith("Error:") ? "error" : ""}`.trim()}>{msg.startsWith("Error:") ? msg : msg}</div>}
-            {msg && msg.startsWith("Error:") && <div className="alert error">{msg}</div>}
-            {msg && !msg.startsWith("Error:") && <div className="alert">{msg}</div>}
+            {msg && <div className="alert">{msg}</div>}
 
             {section === "vault" && (
                 <div className="gridTwo">
                     <Card
-                        title="Local Wallet Vault"
-                        subtitle="Encrypted key storage (PBKDF2 + AES-GCM). Stored only in this browser."
-                        actions={
-                            wallet.status === "unlocked" ? (
-                                <button className="btn small" onClick={onLock}>
-                                    Lock
-                                </button>
-                            ) : null
-                        }
+                        title="Wallet Vault"
+                        subtitle="Encrypted key storage stored only on this device."
+                        actions={wallet.status === "unlocked" ? <button className="btn small" onClick={onLock}>Lock</button> : null}
                     >
                         {wallet.status === "locked" && !wallet.hasVault && (
                             <>
-                                <p className="muted">No wallet exists locally yet. Create one with a strong password.</p>
+                                <p className="muted">Create a local wallet to get started.</p>
 
                                 <label className="label">
                                     Password
-                                    <input
-                                        className="input"
-                                        type="password"
-                                        value={pwd}
-                                        onChange={(e) => setPwd(e.target.value)}
-                                        placeholder="At least 10 characters"
-                                        autoComplete="new-password"
-                                    />
+                                    <input className="input" type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="new-password" />
                                 </label>
 
                                 <label className="label">
                                     Confirm Password
-                                    <input
-                                        className="input"
-                                        type="password"
-                                        value={pwd2}
-                                        onChange={(e) => setPwd2(e.target.value)}
-                                        placeholder="Repeat password"
-                                        autoComplete="new-password"
-                                    />
+                                    <input className="input" type="password" value={pwd2} onChange={(e) => setPwd2(e.target.value)} autoComplete="new-password" />
                                 </label>
 
                                 <div className="rowBtns">
-                                    <button className="btn primary" onClick={onCreate} disabled={busy}>
-                                        Create Wallet
-                                    </button>
+                                    <button className="btn primary" onClick={onCreate} disabled={busy}>Create Wallet</button>
                                 </div>
                             </>
                         )}
 
                         {wallet.status === "locked" && wallet.hasVault && (
                             <>
-                                <p className="muted">Unlock your vault to view address and sign transactions.</p>
+                                <p className="muted">Unlock to view your address and sign transactions.</p>
 
                                 <label className="label">
                                     Password
-                                    <input
-                                        className="input"
-                                        type="password"
-                                        value={pwd}
-                                        onChange={(e) => setPwd(e.target.value)}
-                                        placeholder="Your wallet password"
-                                        autoComplete="current-password"
-                                    />
+                                    <input className="input" type="password" value={pwd} onChange={(e) => setPwd(e.target.value)} autoComplete="current-password" />
                                 </label>
 
                                 <div className="rowBtns">
-                                    <button className="btn primary" onClick={onUnlock} disabled={busy}>
-                                        Unlock
-                                    </button>
-                                    <button className="btn danger" onClick={onReset} disabled={busy}>
-                                        Delete Vault
-                                    </button>
+                                    <button className="btn primary" onClick={onUnlock} disabled={busy}>Unlock</button>
+                                    <button className="btn danger" onClick={onReset} disabled={busy}>Delete</button>
                                 </div>
                             </>
                         )}
@@ -375,32 +328,24 @@ export default function Wallet(): React.ReactElement {
                             <>
                                 <div className="kv">
                                     <div className="row">
-                                        <span>Status</span>
-                                        <span className="value">Unlocked</span>
-                                    </div>
-                                    <div className="row">
                                         <span>Address</span>
                                         <span className="value mono">{wallet.address}</span>
                                     </div>
                                     <div className="row">
-                                        <span>Public Fingerprint</span>
+                                        <span>Fingerprint</span>
                                         <span className="value mono">{wallet.publicKeyFingerprintHex.slice(0, 28)}…</span>
                                     </div>
                                 </div>
 
                                 <div className="rowBtns">
-                                    <button className="btn" onClick={() => void onCopy(wallet.address)}>
-                                        Copy Address
-                                    </button>
-                                    <button className="btn danger" onClick={onReset}>
-                                        Delete Vault
-                                    </button>
+                                    <button className="btn" onClick={() => void onCopy(wallet.address)}>Copy Address</button>
+                                    <button className="btn danger" onClick={onReset}>Delete</button>
                                 </div>
                             </>
                         )}
                     </Card>
 
-                    <Card title="Receive" subtitle="Use this address to receive Veltaros.">
+                    <Card title="Receive" subtitle="Share this address to receive Veltaros.">
                         {wallet.status !== "unlocked" ? (
                             <p className="muted">Unlock your wallet to view your receive address.</p>
                         ) : (
@@ -410,9 +355,7 @@ export default function Wallet(): React.ReactElement {
                                     <div className="mono">{wallet.address}</div>
                                 </div>
                                 <div className="rowBtns">
-                                    <button className="btn primary" onClick={() => void onCopy(wallet.address)}>
-                                        Copy
-                                    </button>
+                                    <button className="btn primary" onClick={() => void onCopy(wallet.address)}>Copy</button>
                                 </div>
                             </>
                         )}
@@ -423,8 +366,8 @@ export default function Wallet(): React.ReactElement {
             {section === "tx" && (
                 <div className="gridTwo">
                     <Card
-                        title="Create Transaction"
-                        subtitle="Draft a transaction, then sign with your wallet vault."
+                        title="Send"
+                        subtitle="Create a transaction draft, then sign with your vault."
                         actions={
                             <div className="rowBtns">
                                 <button className="btn small primary" onClick={() => void openSign()} disabled={busy || wallet.status !== "unlocked"}>
@@ -474,8 +417,8 @@ export default function Wallet(): React.ReactElement {
                     </Card>
 
                     <Card
-                        title="Transaction History"
-                        subtitle="Stored locally in this browser."
+                        title="History"
+                        subtitle="Stored locally on this device."
                         actions={
                             <button className="btn small danger" onClick={onClearHistory} disabled={history.length === 0}>
                                 Clear
@@ -513,7 +456,7 @@ export default function Wallet(): React.ReactElement {
 
             {section === "network" && (
                 <div className="gridTwo">
-                    <Card title="Node Status" subtitle="Live operational status from your node.">
+                    <Card title="Status" subtitle="Live node status.">
                         {status.loading && <p className="muted">Loading…</p>}
                         {status.error && <p className="error">Error: {status.error}</p>}
                         {status.data && (
@@ -537,10 +480,6 @@ export default function Wallet(): React.ReactElement {
                                 <div className="row">
                                     <span>Peers</span>
                                     <span className="value">{status.data.peers}</span>
-                                </div>
-                                <div className="row">
-                                    <span>Known</span>
-                                    <span className="value">{status.data.knownPeers}</span>
                                 </div>
                             </div>
                         )}
@@ -583,7 +522,7 @@ export default function Wallet(): React.ReactElement {
                         )}
                     </Card>
 
-                    <Card title="Peers" subtitle="Connected peers and verification status." className="spanAll">
+                    <Card title="Peers" subtitle="Connected peers." className="spanAll">
                         {peers.loading && <p className="muted">Loading…</p>}
                         {peers.error && <p className="error">Error: {peers.error}</p>}
                         {peers.data && (
@@ -604,9 +543,7 @@ export default function Wallet(): React.ReactElement {
                                         <tbody>
                                             {peers.data.peers.length === 0 ? (
                                                 <tr>
-                                                    <td colSpan={6} className="muted">
-                                                        No peers connected.
-                                                    </td>
+                                                    <td colSpan={6} className="muted">No peers connected.</td>
                                                 </tr>
                                             ) : (
                                                 peers.data.peers.map((p) => (
@@ -632,10 +569,9 @@ export default function Wallet(): React.ReactElement {
                 </div>
             )}
 
-            <Modal open={signOpen} title="Confirm signing" onClose={() => setSignOpen(false)}>
-                <p className="muted">
-                    Enter your wallet password to decrypt the local vault and sign this transaction.
-                </p>
+            <Modal open={signOpen} title="Sign transaction" onClose={() => setSignOpen(false)}>
+                <p className="muted">Enter your password to unlock the vault and sign.</p>
+
                 <label className="label">
                     Wallet password
                     <input className="input" type="password" value={signPwd} onChange={(e) => setSignPwd(e.target.value)} autoComplete="current-password" />
