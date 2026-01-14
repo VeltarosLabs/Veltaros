@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -129,6 +130,7 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			"knownPeers":  rt.p2p.KnownPeerCount(),
 			"bannedPeers": rt.p2p.BanCount(),
 			"height":      rt.chain.Height(),
+			"mempool":     rt.chain.MempoolCount(),
 			"dataDir":     rt.store.DataDir,
 		})
 	})
@@ -138,6 +140,77 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			"count": rt.p2p.PeerCount(),
 			"peers": rt.p2p.Peers(),
 		})
+	})
+
+	mux.HandleFunc("/mempool", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count": rt.chain.MempoolCount(),
+			"txs":   rt.chain.MempoolList(),
+		})
+	})
+
+	mux.HandleFunc("/tx/validate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		body, err := readBodyLimited(r.Body, 256*1024)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+
+		var tx blockchain.SignedTx
+		if err := json.Unmarshal(body, &tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+
+		// network hard check (node policy)
+		if tx.Draft.NetworkID != rt.networkID {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "networkId mismatch"})
+			return
+		}
+
+		if err := blockchain.ValidateSignedTx(tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
+	})
+
+	mux.HandleFunc("/tx/broadcast", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		body, err := readBodyLimited(r.Body, 256*1024)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+
+		var tx blockchain.SignedTx
+		if err := json.Unmarshal(body, &tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+
+		if tx.Draft.NetworkID != rt.networkID {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "networkId mismatch"})
+			return
+		}
+
+		if err := rt.chain.MempoolAdd(tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
 	})
 
 	srv := &http.Server{
@@ -175,6 +248,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+func readBodyLimited(r io.Reader, limit int64) ([]byte, error) {
+	lr := io.LimitReader(r, limit)
+	b, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) >= limit {
+		return nil, errors.New("request too large")
+	}
+	return b, nil
+}
+
 func waitForShutdown(log *slog.Logger) {
 	ch := make(chan os.Signal, 2)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
@@ -187,7 +272,6 @@ func exitWithError(err error) int {
 	return 1
 }
 
-// Identity key file format: hex-encoded ed25519 private key (64 bytes).
 func loadOrCreateIdentityKey(path string) (ed25519.PrivateKey, error) {
 	if b, err := os.ReadFile(path); err == nil {
 		s := trimSpaceASCII(string(b))

@@ -1,14 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import {
-    addressFromPublicKeyRaw,
+    addressFromPublicKeySpki,
     decryptJsonWithPassword,
     encryptJsonWithPassword,
     exportPrivateKeyPkcs8,
-    exportPublicKeyRaw,
-    generateEd25519Keypair,
+    exportPublicKeySpki,
+    extractEd25519RawPublicKeyFromSpki,
     hex,
     importPrivateKeyPkcs8,
-    importPublicKeySpki,
     sha256Bytes
 } from "../crypto/webcrypto";
 import {
@@ -27,7 +26,8 @@ export type WalletState =
         status: "unlocked";
         hasVault: true;
         address: string;
-        publicKeyHex: string;
+        publicKeyFingerprintHex: string;
+        publicKeyRawHex: string;
     };
 
 export function useWallet() {
@@ -46,12 +46,10 @@ export function useWallet() {
     }, []);
 
     const createNew = useCallback(async (password: string) => {
-        if (!password || password.length < 10) {
-            throw new Error("Password must be at least 10 characters");
-        }
+        if (!password || password.length < 10) throw new Error("Password must be at least 10 characters");
 
-        const kp = await generateEd25519Keypair();
-        const publicSpki = await exportPublicKeyRaw(kp.publicKey);
+        const kp = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+        const publicSpki = await exportPublicKeySpki(kp.publicKey);
         const privatePkcs8 = await exportPrivateKeyPkcs8(kp.privateKey);
 
         const payload = createVaultPayload(publicSpki, privatePkcs8);
@@ -59,12 +57,17 @@ export function useWallet() {
 
         saveEncryptedVault(encrypted);
 
-        // Derive identity for UI
-        const pubHash = await sha256Bytes(publicSpki);
-        const pubHex = hex(pubHash); // display-friendly stable fingerprint (hash of SPKI)
-        const addr = await addressFromPublicKeyRaw(publicSpki);
+        const pubFp = hex(await sha256Bytes(publicSpki));
+        const addr = await addressFromPublicKeySpki(publicSpki);
+        const rawPubHex = hex(extractEd25519RawPublicKeyFromSpki(publicSpki));
 
-        setState({ status: "unlocked", hasVault: true, address: addr, publicKeyHex: pubHex });
+        setState({
+            status: "unlocked",
+            hasVault: true,
+            address: addr,
+            publicKeyFingerprintHex: pubFp,
+            publicKeyRawHex: rawPubHex
+        });
     }, []);
 
     const unlock = useCallback(async (password: string) => {
@@ -74,11 +77,17 @@ export function useWallet() {
         const payload = await decryptJsonWithPassword<WalletVault>(blob, password);
         const { publicKeySpki } = parseVaultPayload(payload);
 
-        const pubHash = await sha256Bytes(publicKeySpki);
-        const pubHex = hex(pubHash);
-        const addr = await addressFromPublicKeyRaw(publicKeySpki);
+        const pubFp = hex(await sha256Bytes(publicKeySpki));
+        const addr = await addressFromPublicKeySpki(publicKeySpki);
+        const rawPubHex = hex(extractEd25519RawPublicKeyFromSpki(publicKeySpki));
 
-        setState({ status: "unlocked", hasVault: true, address: addr, publicKeyHex: pubHex });
+        setState({
+            status: "unlocked",
+            hasVault: true,
+            address: addr,
+            publicKeyFingerprintHex: pubFp,
+            publicKeyRawHex: rawPubHex
+        });
     }, []);
 
     const lock = useCallback(() => {
@@ -97,21 +106,14 @@ export function useWallet() {
         const payload = await decryptJsonWithPassword<WalletVault>(blob, password);
         const { publicKeySpki, privateKeyPkcs8 } = parseVaultPayload(payload);
 
-        const pubKey = await importPublicKeySpki(publicKeySpki);
         const privKey = await importPrivateKeyPkcs8(privateKeyPkcs8);
+        const pubRaw = extractEd25519RawPublicKeyFromSpki(publicKeySpki);
 
-        return { publicKeySpki, privateKeyPkcs8, pubKey, privKey };
+        return { publicKeySpki, privateKeyPkcs8, privateKey: privKey, publicKeyRaw: pubRaw };
     }, []);
 
     const actions = useMemo(
-        () => ({
-            refreshHasVault,
-            createNew,
-            unlock,
-            lock,
-            reset,
-            exportKeysForSigning
-        }),
+        () => ({ refreshHasVault, createNew, unlock, lock, reset, exportKeysForSigning }),
         [refreshHasVault, createNew, unlock, lock, reset, exportKeysForSigning]
     );
 

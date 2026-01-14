@@ -50,27 +50,30 @@ export function hex(bytes: Uint8Array): string {
         .join("");
 }
 
-export async function addressFromPublicKeyRaw(publicKeyRaw: Uint8Array): Promise<string> {
-    // pubHash20 = sha256(pubKey)[:20]
-    const h = await sha256Bytes(publicKeyRaw);
+export function hexToBytes(h: string): Uint8Array {
+    const s = h.trim().toLowerCase();
+    if (s.length % 2 !== 0) throw new Error("Invalid hex length");
+    const out = new Uint8Array(s.length / 2);
+    for (let i = 0; i < out.length; i++) {
+        out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16);
+    }
+    return out;
+}
+
+export async function addressFromPublicKeySpki(spki: Uint8Array): Promise<string> {
+    const h = await sha256Bytes(spki);
     const pubHash20 = h.slice(0, 20);
-    // checksum4 = doubleSha256(pubHash20)[:4]
     const chk = await doubleSha256Bytes(pubHash20);
     const addr = concatBytes(pubHash20, chk.slice(0, 4));
     return hex(addr);
 }
 
 export async function generateEd25519Keypair(): Promise<CryptoKeyPair> {
-    return crypto.subtle.generateKey(
-        { name: "Ed25519" },
-        true,
-        ["sign", "verify"]
-    );
+    return crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
 }
 
-export async function exportPublicKeyRaw(key: CryptoKey): Promise<Uint8Array> {
+export async function exportPublicKeySpki(key: CryptoKey): Promise<Uint8Array> {
     const spki = await crypto.subtle.exportKey("spki", key);
-    // For Ed25519, SPKI wraps the raw pubkey. We keep SPKI for portability.
     return new Uint8Array(spki);
 }
 
@@ -80,41 +83,37 @@ export async function exportPrivateKeyPkcs8(key: CryptoKey): Promise<Uint8Array>
 }
 
 export async function importPrivateKeyPkcs8(pkcs8: Uint8Array): Promise<CryptoKey> {
-    return crypto.subtle.importKey(
-        "pkcs8",
-        pkcs8,
-        { name: "Ed25519" },
-        true,
-        ["sign"]
-    );
+    return crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, true, ["sign"]);
 }
 
 export async function importPublicKeySpki(spki: Uint8Array): Promise<CryptoKey> {
-    return crypto.subtle.importKey(
-        "spki",
-        spki,
-        { name: "Ed25519" },
-        true,
-        ["verify"]
-    );
+    return crypto.subtle.importKey("spki", spki, { name: "Ed25519" }, true, ["verify"]);
+}
+
+// Extract the raw ed25519 public key from SPKI.
+// Ed25519 SPKI is a small ASN.1 wrapper around 32 raw bytes. We parse it safely.
+export function extractEd25519RawPublicKeyFromSpki(spki: Uint8Array): Uint8Array {
+    // Minimal DER parsing:
+    // Look for last 32 bytes which represent the BIT STRING payload for Ed25519 public key.
+    // We validate basic structure by ensuring the SPKI is reasonably sized.
+    if (spki.length < 44 || spki.length > 128) {
+        throw new Error("Unexpected SPKI length");
+    }
+    const raw = spki.slice(spki.length - 32);
+    if (raw.length !== 32) throw new Error("Invalid raw public key length");
+    return raw;
+}
+
+export async function signEd25519(privateKey: CryptoKey, msg32: Uint8Array): Promise<Uint8Array> {
+    if (msg32.length !== 32) throw new Error("sign expects 32-byte message hash");
+    const sig = await crypto.subtle.sign({ name: "Ed25519" }, privateKey, msg32);
+    return new Uint8Array(sig);
 }
 
 export async function deriveAesKeyFromPassword(password: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
-    const baseKey = await crypto.subtle.importKey(
-        "raw",
-        enc.encode(password),
-        "PBKDF2",
-        false,
-        ["deriveKey"]
-    );
-
+    const baseKey = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
     return crypto.subtle.deriveKey(
-        {
-            name: "PBKDF2",
-            salt,
-            iterations,
-            hash: "SHA-256"
-        },
+        { name: "PBKDF2", salt, iterations, hash: "SHA-256" },
         baseKey,
         { name: "AES-GCM", length: 256 },
         false,
@@ -148,8 +147,8 @@ export async function decryptJsonWithPassword<T>(blob: EncryptedBlob, password: 
     const ct = fromB64(blob.ctB64);
 
     const key = await deriveAesKeyFromPassword(password, salt, blob.kdf.iterations);
-
     const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+
     const text = dec.decode(pt);
     return JSON.parse(text) as T;
 }

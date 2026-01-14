@@ -37,6 +37,18 @@ export class VeltarosApiClient {
         return this.getJson<PeerList>("/peers", signal);
     }
 
+    async mempool(signal?: AbortSignal): Promise<unknown> {
+        return this.getJson<unknown>("/mempool", signal);
+    }
+
+    async txValidate(body: unknown, signal?: AbortSignal): Promise<unknown> {
+        return this.postJson<unknown>("/tx/validate", body, signal);
+    }
+
+    async txBroadcast(body: unknown, signal?: AbortSignal): Promise<unknown> {
+        return this.postJson<unknown>("/tx/broadcast", body, signal);
+    }
+
     private async getJson<T extends Json>(path: string, signal?: AbortSignal): Promise<T> {
         const url = `${this.baseUrl}${path}`;
         const res = await fetch(url, {
@@ -50,7 +62,23 @@ export class VeltarosApiClient {
             throw new VeltarosApiError(`HTTP ${res.status} for ${path}${text ? `: ${text}` : ""}`, res.status, url);
         }
 
-        // node API is strict JSON; if invalid, it will throw (that’s fine)
+        return (await res.json()) as T;
+    }
+
+    private async postJson<T extends Json>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+        const url = `${this.baseUrl}${path}`;
+        const res = await fetch(url, {
+            method: "POST",
+            headers: { Accept: "application/json", "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            signal
+        });
+
+        if (!res.ok) {
+            const text = await safeReadText(res);
+            throw new VeltarosApiError(`HTTP ${res.status} for ${path}${text ? `: ${text}` : ""}`, res.status, url);
+        }
+
         return (await res.json()) as T;
     }
 }
