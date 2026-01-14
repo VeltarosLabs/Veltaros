@@ -8,16 +8,18 @@ export default function App(): React.ReactElement {
     return (
         <div className="app">
             <Navbar />
-            <main className="container">
+            <main className="container main">
                 <Routes>
                     <Route path="/" element={<Landing />} />
                     <Route path="/wallet" element={<Wallet />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
             </main>
+
             <footer className="footer">
-                <div className="footer-inner">
+                <div className="footerInner">
                     <span>© {new Date().getFullYear()} VeltarosLabs</span>
+                    <span className="muted">MIT Licensed</span>
                 </div>
             </footer>
         </div>

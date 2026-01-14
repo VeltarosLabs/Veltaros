@@ -1,5 +1,6 @@
-import React from "react";
-import { Link, NavLink } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import logoUrl from "../assets/veltaros-mark.svg";
 
 const links = {
     github: "https://github.com/VeltarosLabs",
@@ -8,23 +9,42 @@ const links = {
 };
 
 export default function Navbar(): React.ReactElement {
+    const [open, setOpen] = useState(false);
+    const loc = useLocation();
+
+    useMemo(() => {
+        setOpen(false);
+        return null;
+    }, [loc.pathname]);
+
     return (
         <header className="nav">
-            <div className="nav-inner container">
+            <div className="navInner">
                 <Link to="/" className="brand" aria-label="Veltaros home">
-                    Veltaros
+                    <img className="brandLogo" src={logoUrl} alt="Veltaros" />
+                    <span className="brandText">Veltaros</span>
                 </Link>
 
-                <nav className="nav-links" aria-label="Primary navigation">
-                    <NavLink to="/" className={({ isActive }) => (isActive ? "active" : "")} end>
+                <button
+                    type="button"
+                    className="navToggle"
+                    aria-label={open ? "Close menu" : "Open menu"}
+                    aria-expanded={open}
+                    onClick={() => setOpen((v) => !v)}
+                >
+                    <span className="navToggleBars" />
+                </button>
+
+                <nav className={`navLinks ${open ? "open" : ""}`.trim()} aria-label="Primary navigation">
+                    <NavLink to="/" end className={({ isActive }) => (isActive ? "active" : "")}>
                         Home
                     </NavLink>
                     <NavLink to="/wallet" className={({ isActive }) => (isActive ? "active" : "")}>
                         Wallet
                     </NavLink>
-                </nav>
 
-                <div className="nav-social" aria-label="Social links">
+                    <div className="navDivider" />
+
                     <a href={links.github} target="_blank" rel="noreferrer noopener">
                         GitHub
                     </a>
@@ -34,7 +54,7 @@ export default function Navbar(): React.ReactElement {
                     <a href={links.reddit} target="_blank" rel="noreferrer noopener">
                         Reddit
                     </a>
-                </div>
+                </nav>
             </div>
         </header>
     );
