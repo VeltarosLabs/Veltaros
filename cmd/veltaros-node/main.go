@@ -54,6 +54,10 @@ func main() {
 		os.Exit(exitWithError(err))
 	}
 
+	if err := p2p.EnsureIdentityRecord(filepath.Clean(cfg.Network.IdentityRecordPath), identityPriv); err != nil {
+		os.Exit(exitWithError(err))
+	}
+
 	chain := blockchain.New()
 
 	p2pNode, err := p2p.New(p2p.Config{
@@ -67,8 +71,9 @@ func main() {
 		NetworkID:       cfg.Network.NetworkID,
 		IdentityPrivKey: identityPriv,
 
-		BanlistPath:   cfg.Network.BanlistPath,
-		PeerStorePath: cfg.Network.PeerStorePath,
+		BanlistPath:    cfg.Network.BanlistPath,
+		PeerStorePath:  cfg.Network.PeerStorePath,
+		ScoreStorePath: cfg.Network.ScoreStorePath,
 	}, log)
 	if err != nil {
 		os.Exit(exitWithError(err))

@@ -1,5 +1,4 @@
 package api
 
-// Package api is reserved for public API types (HTTP/JSON schemas, RPC types).
-// Implementation lives in internal packages.
-// This file prevents empty-package build failures and provides a stable import path.
+// Package api provides a small, stable client for the Veltaros node HTTP API.
+// It is intended for internal tools, integration tests, and future services.

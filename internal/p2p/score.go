@@ -1,6 +1,10 @@
 package p2p
 
 import (
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -9,6 +13,7 @@ import (
 // - Score increases on protocol violations / rate limit violations / handshake failures.
 // - Score decays over time so nodes can recover.
 // - Threshold triggers ban (hard ban persisted via Banlist).
+// - Scores persist to disk so restarts don’t reset reputation.
 
 type ScoreConfig struct {
 	DecayInterval time.Duration // e.g. 1 minute
@@ -20,6 +25,12 @@ type ScoreConfig struct {
 type scoreEntry struct {
 	Score      int
 	LastUpdate time.Time
+}
+
+type ScoreSnapshot struct {
+	Addr       string    `json:"addr"`
+	Score      int       `json:"score"`
+	LastUpdate time.Time `json:"lastUpdate"`
 }
 
 type Scorer struct {
@@ -76,6 +87,90 @@ func (s *Scorer) Add(addr string, points int) (score int, banned bool, banFor ti
 		return e.Score, true, s.cfg.BanDuration
 	}
 	return e.Score, false, 0
+}
+
+func (s *Scorer) Snapshot() []ScoreSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	out := make([]ScoreSnapshot, 0, len(s.data))
+	for addr, e := range s.data {
+		if addr == "" {
+			continue
+		}
+		e = s.applyDecayLocked(e, now)
+		s.data[addr] = e
+		if e.Score <= 0 {
+			continue
+		}
+		out = append(out, ScoreSnapshot{
+			Addr:       addr,
+			Score:      e.Score,
+			LastUpdate: e.LastUpdate,
+		})
+	}
+	return out
+}
+
+func (s *Scorer) Load(path string) error {
+	path = filepath.Clean(path)
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+
+	var snaps []ScoreSnapshot
+	if err := json.Unmarshal(raw, &snaps); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, sn := range snaps {
+		if sn.Addr == "" || sn.Score <= 0 {
+			continue
+		}
+		e := scoreEntry{Score: sn.Score, LastUpdate: sn.LastUpdate}
+		e = s.applyDecayLocked(e, now)
+		if e.Score <= 0 {
+			continue
+		}
+		s.data[sn.Addr] = e
+	}
+	return nil
+}
+
+func (s *Scorer) Save(path string) error {
+	path = filepath.Clean(path)
+
+	snaps := s.Snapshot()
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(snaps, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	_ = os.Chmod(path, 0o600)
+	return nil
 }
 
 func (s *Scorer) applyDecayLocked(e scoreEntry, now time.Time) scoreEntry {

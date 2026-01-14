@@ -1,26 +1,8 @@
 [
   {
-    "addr": "127.0.0.1:30304",
-    "until": "2026-01-13T20:22:07.7409214Z",
-    "reason": "protocol violation",
-    "updatedAt": "2026-01-13T20:12:07.7409214Z"
-  },
-  {
-    "addr": "127.0.0.1:54689",
-    "until": "2026-01-13T20:22:07.0973836Z",
-    "reason": "protocol violation",
-    "updatedAt": "2026-01-13T20:12:07.0973836Z"
-  },
-  {
     "addr": "127.0.0.1:30303",
-    "until": "2026-01-13T20:22:07.951094Z",
-    "reason": "protocol violation",
-    "updatedAt": "2026-01-13T20:12:07.951094Z"
-  },
-  {
-    "addr": "127.0.0.1:54690",
-    "until": "2026-01-13T20:22:07.6904722Z",
-    "reason": "protocol violation",
-    "updatedAt": "2026-01-13T20:12:07.6904722Z"
+    "until": "2026-01-14T11:48:42.7745507Z",
+    "reason": "hello invalid: EOF",
+    "updatedAt": "2026-01-14T11:18:42.7745507Z"
   }
 ]

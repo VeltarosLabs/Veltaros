@@ -7,6 +7,7 @@
     --border: rgba(255, 255, 255, 0.08);
     --btn: rgba(255, 255, 255, 0.08);
     --btnHover: rgba(255, 255, 255, 0.12);
+    --danger: #fb7185;
 }
 
 * {
@@ -163,6 +164,79 @@ a {
     margin-top: 0;
 }
 
+.muted {
+    color: var(--muted);
+}
+
+.error {
+    color: var(--danger);
+}
+
+.tiny {
+    font-size: 0.85rem;
+}
+
+.mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.code {
+    padding: 0.15rem 0.35rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.kv .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.kv .row:last-child {
+    border-bottom: none;
+}
+
+.kv .value {
+    text-align: right;
+    color: var(--text);
+}
+
+.tableWrap {
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    margin-top: 0.75rem;
+}
+
+.table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 720px;
+}
+
+.table th,
+.table td {
+    padding: 0.6rem 0.7rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    text-align: left;
+    vertical-align: top;
+}
+
+.table th {
+    color: var(--muted);
+    font-weight: 600;
+}
+
 @media (max-width: 900px) {
     .cards {
         grid-template-columns: 1fr;
@@ -170,5 +244,9 @@ a {
 
     .nav-inner {
         flex-wrap: wrap;
+    }
+
+    .grid {
+        grid-template-columns: 1fr;
     }
 }

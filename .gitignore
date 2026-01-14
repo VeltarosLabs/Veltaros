@@ -1,5 +1,3 @@
-# Path: .gitignore
-
 # --- OS / Editor ---
 .DS_Store
 Thumbs.db
@@ -77,3 +75,4 @@ web/.vercel/
 # Cache
 web/.cache/
 web/.turbo/
+

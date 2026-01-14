@@ -25,8 +25,9 @@ type Config struct {
 	NetworkID       string
 	IdentityPrivKey ed25519.PrivateKey
 
-	BanlistPath   string
-	PeerStorePath string
+	BanlistPath    string
+	PeerStorePath  string
+	ScoreStorePath string
 }
 
 type PeerInfo struct {
@@ -58,8 +59,7 @@ type Node struct {
 
 	banlist   *Banlist
 	peerStore *PeerStore
-
-	scorer *Scorer
+	scorer    *Scorer
 }
 
 type peerConn struct {
@@ -74,25 +74,23 @@ type peerConn struct {
 	score    int
 
 	lastMsgAt time.Time
-
-	lim limiter
+	lim       limiter
 }
 
 type limiter struct {
 	mu         sync.Mutex
 	tokens     float64
 	last       time.Time
-	rate       float64 // tokens per second
+	rate       float64
 	burst      float64
 	costPerMsg float64
 }
 
 func newLimiter() limiter {
-	// Default: allow ~60 messages/min with burst.
 	return limiter{
 		tokens:     30,
 		last:       time.Now().UTC(),
-		rate:       1.0,  // 1 token/sec
+		rate:       1.0,  // tokens/sec
 		burst:      60.0, // max tokens
 		costPerMsg: 1.0,
 	}
@@ -111,7 +109,6 @@ func (l *limiter) allow() bool {
 		}
 		l.last = now
 	}
-
 	if l.tokens < l.costPerMsg {
 		return false
 	}
@@ -153,6 +150,9 @@ func New(cfg Config, log *slog.Logger) (*Node, error) {
 	if cfg.PeerStorePath == "" {
 		return nil, errors.New("PeerStorePath is required")
 	}
+	if cfg.ScoreStorePath == "" {
+		return nil, errors.New("ScoreStorePath is required")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -175,6 +175,7 @@ func New(cfg Config, log *slog.Logger) (*Node, error) {
 	}
 
 	_ = n.banlist.Load()
+	_ = n.scorer.Load(cfg.ScoreStorePath)
 
 	if peers, err := n.peerStore.Load(); err == nil {
 		for _, p := range peers {
@@ -358,6 +359,7 @@ func (n *Node) persistLoop() {
 
 func (n *Node) persistOnce() error {
 	_ = n.banlist.Save()
+	_ = n.scorer.Save(n.cfg.ScoreStorePath)
 
 	n.knownMu.RLock()
 	peers := make([]StoredPeer, 0, len(n.knownPeers))
@@ -552,6 +554,7 @@ func (n *Node) tryRegisterPeer(conn net.Conn, inbound bool) bool {
 		inbound:     inbound,
 		connectedAt: time.Now().UTC(),
 		lastMsgAt:   time.Now().UTC(),
+		score:       n.scorer.Get(key),
 		lim:         newLimiter(),
 	}
 
@@ -568,8 +571,7 @@ func (n *Node) updatePeer(conn net.Conn, fn func(p peerConn) peerConn) {
 	if !ok {
 		return
 	}
-	p = fn(p)
-	n.peers[key] = p
+	n.peers[key] = fn(p)
 }
 
 func (n *Node) unregisterPeer(conn net.Conn) {
@@ -632,6 +634,8 @@ func (n *Node) sendGetPeers(conn net.Conn) {
 	_ = bw.Flush()
 }
 
+// ---- Connection lifecycle (HELLO + challenge + messages) ----
+
 func (n *Node) handleConn(conn net.Conn, inbound bool) {
 	defer func() {
 		_ = conn.Close()
@@ -672,7 +676,7 @@ func (n *Node) handleConn(conn net.Conn, inbound bool) {
 		}
 	}
 
-	// Store peer hello
+	// Store peer metadata
 	n.updatePeer(conn, func(p peerConn) peerConn {
 		p.pubKey = peerHello.PublicKey
 		p.nodeVersion = peerHello.NodeVersion
@@ -682,7 +686,7 @@ func (n *Node) handleConn(conn net.Conn, inbound bool) {
 	})
 	n.learnPeer(conn.RemoteAddr().String(), "learned")
 
-	// Challenge-response: prove the peer controls their announced public key.
+	// Challenge-response: prove peer controls announced key
 	verified, verr := n.performChallengeHandshake(conn, br, bw, peerHello.PublicKey)
 	if verr != nil || !verified {
 		n.penalize(conn.RemoteAddr().String(), 5, "challenge failed: "+safeErr(verr))
@@ -708,7 +712,7 @@ func (n *Node) handleConn(conn net.Conn, inbound bool) {
 			return
 		}
 
-		// Rate limiting (per-connection)
+		// Rate limit per connection
 		allowed := true
 		n.updatePeer(conn, func(p peerConn) peerConn {
 			if !p.lim.allow() {
@@ -758,7 +762,6 @@ func (n *Node) handleConn(conn net.Conn, inbound bool) {
 			}
 
 		case MsgChallenge:
-			// Respond to their challenge anytime after handshake.
 			if len(f.Payload) != challengeSize {
 				n.penalize(conn.RemoteAddr().String(), 3, "invalid challenge size")
 				return
@@ -778,7 +781,6 @@ func (n *Node) handleConn(conn net.Conn, inbound bool) {
 			}
 
 		case MsgChallengeResp:
-			// Unexpected during steady-state; treat as suspicious.
 			n.penalize(conn.RemoteAddr().String(), 2, "unexpected challenge response")
 			return
 
@@ -799,14 +801,6 @@ func safeErr(err error) string {
 }
 
 func (n *Node) performChallengeHandshake(conn net.Conn, br *bufio.Reader, bw *bufio.Writer, peerPub ed25519.PublicKey) (bool, error) {
-	// Steps:
-	// 1) Send challenge to peer.
-	// 2) Read frames until:
-	//    - We receive a valid ChallengeResp for our challenge (success), OR
-	//    - Timeout / invalid response / too many frames.
-	//
-	// Also: if peer sends us a challenge in the middle, we respond.
-
 	if len(peerPub) != ed25519.PublicKeySize {
 		return false, errors.New("peer pubkey invalid")
 	}
@@ -823,7 +817,6 @@ func (n *Node) performChallengeHandshake(conn net.Conn, br *bufio.Reader, bw *bu
 		return false, err
 	}
 
-	// Handshake deadline bound
 	_ = conn.SetReadDeadline(time.Now().Add(n.cfg.HandshakeTimeout))
 
 	maxFrames := 16
@@ -840,7 +833,6 @@ func (n *Node) performChallengeHandshake(conn net.Conn, br *bufio.Reader, bw *bu
 			}
 			var c [challengeSize]byte
 			copy(c[:], f.Payload)
-
 			resp, err := SignChallenge(n.cfg.IdentityPrivKey, n.cfg.NetworkID, c)
 			if err != nil {
 				return false, err
@@ -865,11 +857,10 @@ func (n *Node) performChallengeHandshake(conn net.Conn, br *bufio.Reader, bw *bu
 			_ = bw.Flush()
 
 		case MsgHello:
-			// HELLO should not repeat after initial exchange
 			return false, errors.New("unexpected hello during challenge")
 
 		default:
-			// Ignore other frames during handshake window
+			// ignore during handshake
 		}
 	}
 
@@ -965,9 +956,10 @@ func (n *Node) penalize(addr string, points int, reason string) {
 	if ban {
 		n.banlist.Ban(addr, banFor, reason)
 		_ = n.banlist.Save()
+		_ = n.scorer.Save(n.cfg.ScoreStorePath)
 		n.log.Warn("peer banned", "addr", addr, "for", banFor.String(), "reason", reason)
 
-		// If currently connected, close it
+		// close if connected
 		n.mu.RLock()
 		p, ok := n.peers[addr]
 		n.mu.RUnlock()
