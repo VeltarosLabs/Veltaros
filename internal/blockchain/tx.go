@@ -14,12 +14,10 @@ import (
 const (
 	TxVersion uint32 = 1
 
-	// Policy bounds (node-level, can be made configurable later)
 	MaxMemoLen       = 256
-	MaxFutureSkewSec = 5 * 60    // 5 minutes
-	MaxPastSkewSec   = 24 * 3600 // 24 hours
+	MaxFutureSkewSec = 5 * 60
+	MaxPastSkewSec   = 24 * 3600
 	MinFee           = 1
-	MaxTxAmount      = ^uint64(0)
 )
 
 type TxDraft struct {
@@ -40,7 +38,7 @@ type TxDraft struct {
 
 type SignedTx struct {
 	Draft        TxDraft `json:"draft"`
-	PublicKeyHex string  `json:"publicKeyHex"` // ed25519 raw pubkey hex (32 bytes)
+	PublicKeyHex string  `json:"publicKeyHex"` // raw ed25519 pubkey hex (32 bytes)
 	SignatureHex string  `json:"signatureHex"` // ed25519 signature hex (64 bytes)
 	TxID         string  `json:"txId"`         // hex doubleSha256(canonicalDraftBytes)
 }
@@ -49,11 +47,7 @@ func CanonicalDraftBytes(d TxDraft) ([]byte, error) {
 	if d.Version == 0 {
 		d.Version = TxVersion
 	}
-	b, err := json.Marshal(d)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
+	return json.Marshal(d)
 }
 
 func TxHash(d TxDraft) ([32]byte, error) {
@@ -64,6 +58,7 @@ func TxHash(d TxDraft) ([32]byte, error) {
 	return vcrypto.DoubleSha256(b), nil
 }
 
+// SignatureMessage = sha256("veltaros-tx-sign" || networkID || txHash)
 func SignatureMessage(networkID string, txHash [32]byte) [32]byte {
 	domain := []byte("veltaros-tx-sign")
 	msg := make([]byte, 0, len(domain)+len(networkID)+32)
@@ -71,33 +66,6 @@ func SignatureMessage(networkID string, txHash [32]byte) [32]byte {
 	msg = append(msg, []byte(networkID)...)
 	msg = append(msg, txHash[:]...)
 	return vcrypto.Sha256(msg)
-}
-
-func SignDraft(priv ed25519.PrivateKey, d TxDraft) (SignedTx, error) {
-	if len(priv) != ed25519.PrivateKeySize {
-		return SignedTx{}, errors.New("invalid ed25519 private key size")
-	}
-	if d.Timestamp == 0 {
-		d.Timestamp = time.Now().UTC().Unix()
-	}
-	if d.Version == 0 {
-		d.Version = TxVersion
-	}
-
-	h, err := TxHash(d)
-	if err != nil {
-		return SignedTx{}, err
-	}
-	sm := SignatureMessage(d.NetworkID, h)
-	sig := ed25519.Sign(priv, sm[:])
-
-	pub := priv.Public().(ed25519.PublicKey)
-	return SignedTx{
-		Draft:        d,
-		PublicKeyHex: hex.EncodeToString(pub),
-		SignatureHex: hex.EncodeToString(sig),
-		TxID:         hex.EncodeToString(h[:]),
-	}, nil
 }
 
 func ValidateSignedTx(st SignedTx) error {
@@ -121,7 +89,7 @@ func ValidateSignedTx(st SignedTx) error {
 		return errors.New("from and to must differ")
 	}
 
-	if d.Amount == 0 || d.Amount > MaxTxAmount {
+	if d.Amount == 0 {
 		return errors.New("amount must be > 0")
 	}
 	if d.Fee < MinFee {
@@ -136,7 +104,6 @@ func ValidateSignedTx(st SignedTx) error {
 	if d.Timestamp <= 0 {
 		return errors.New("timestamp required")
 	}
-
 	if len(d.Memo) > MaxMemoLen {
 		return errors.New("memo too long")
 	}
@@ -150,6 +117,7 @@ func ValidateSignedTx(st SignedTx) error {
 		return errors.New("timestamp too far in past")
 	}
 
+	// Parse signer public key
 	pubBytes, err := hex.DecodeString(st.PublicKeyHex)
 	if err != nil {
 		return errors.New("invalid publicKeyHex")
@@ -158,6 +126,16 @@ func ValidateSignedTx(st SignedTx) error {
 		return errors.New("invalid publicKeyHex size")
 	}
 
+	// Bind signer -> from address (critical)
+	derivedFrom, err := AddressFromEd25519PublicKeyHex(st.PublicKeyHex)
+	if err != nil {
+		return err
+	}
+	if derivedFrom != d.From {
+		return errors.New("from address does not match signer public key")
+	}
+
+	// Signature bytes
 	sigBytes, err := hex.DecodeString(st.SignatureHex)
 	if err != nil {
 		return errors.New("invalid signatureHex")
@@ -166,6 +144,7 @@ func ValidateSignedTx(st SignedTx) error {
 		return errors.New("invalid signatureHex size")
 	}
 
+	// Tx ID correctness
 	h, err := TxHash(d)
 	if err != nil {
 		return err
@@ -174,6 +153,7 @@ func ValidateSignedTx(st SignedTx) error {
 		return errors.New("txId mismatch")
 	}
 
+	// Signature correctness
 	sm := SignatureMessage(d.NetworkID, h)
 	if !ed25519.Verify(ed25519.PublicKey(pubBytes), sm[:], sigBytes) {
 		return errors.New("invalid signature")
