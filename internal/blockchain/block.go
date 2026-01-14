@@ -18,21 +18,24 @@ type BlockHeader struct {
 
 type Block struct {
 	Header       BlockHeader
-	Transactions []Transaction
+	Transactions []SignedTx
 }
 
 func (h BlockHeader) Hash() [32]byte {
 	// Canonical header serialization (fixed-size fields, little-endian for integers).
-	// This is stable and safe for hashing across platforms.
 	buf := make([]byte, 0, 4+32+32+8+8)
+
 	tmp4 := make([]byte, 4)
 	binary.LittleEndian.PutUint32(tmp4, h.Version)
 	buf = append(buf, tmp4...)
+
 	buf = append(buf, h.PrevHash[:]...)
 	buf = append(buf, h.MerkleRoot[:]...)
+
 	tmp8 := make([]byte, 8)
 	binary.LittleEndian.PutUint64(tmp8, uint64(h.Timestamp))
 	buf = append(buf, tmp8...)
+
 	binary.LittleEndian.PutUint64(tmp8, h.Nonce)
 	buf = append(buf, tmp8...)
 
@@ -40,7 +43,7 @@ func (h BlockHeader) Hash() [32]byte {
 }
 
 func NewGenesisBlock() Block {
-	// Minimal genesis placeholder (safe, deterministic). We’ll formalize genesis params later.
+	// Minimal deterministic genesis. We’ll formalize genesis parameters later.
 	now := time.Unix(0, 0).UTC()
 	return Block{
 		Header: BlockHeader{
@@ -49,7 +52,7 @@ func NewGenesisBlock() Block {
 			Timestamp: now.Unix(),
 			Nonce:     0,
 		},
-		Transactions: []Transaction{},
+		Transactions: []SignedTx{},
 	}
 }
 
@@ -57,9 +60,18 @@ func (b *Block) ValidateBasic() error {
 	if b.Header.Timestamp <= 0 {
 		return errors.New("block timestamp must be set")
 	}
-	// MerkleRoot will be computed once tx format is finalized; for now allow zero if no txs.
+
+	// MerkleRoot computation will be added when we finalize tx merkle rules.
+	// For now, allow zero root for empty blocks.
 	if len(b.Transactions) == 0 {
 		return nil
+	}
+
+	// Basic per-tx validation
+	for i := range b.Transactions {
+		if err := ValidateSignedTx(b.Transactions[i]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
