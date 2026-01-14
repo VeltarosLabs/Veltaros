@@ -6,6 +6,7 @@ import { usePoll } from "../hooks/usePoll";
 import { useWallet } from "../wallet/useWallet";
 import type { TxDraft, SignedTx } from "../tx/types";
 import { signDraft } from "../tx/sign";
+import { validateAddress } from "../tx/address";
 
 function formatUptime(seconds: number): string {
     const s = Math.max(0, Math.floor(seconds));
@@ -104,28 +105,37 @@ export default function Wallet(): React.ReactElement {
             if (wallet.status !== "unlocked") throw new Error("Unlock wallet first");
             if (!status.data) throw new Error("Node status not available yet");
 
-            // get signing key (requires password)
+            const to = txTo.trim();
+            if (!(await validateAddress(to))) {
+                throw new Error("Recipient address is invalid (checksum failed or wrong length)");
+            }
+
             const password = prompt("Enter your wallet password to sign this transaction:");
             if (!password) throw new Error("Signing cancelled");
 
             const { privateKey, publicKeyRaw } = await actions.exportKeysForSigning(password);
 
+            const amount = Number(txAmount);
+            const fee = Number(txFee);
+            const nonce = Number(txNonce);
+
+            if (!Number.isFinite(amount) || amount <= 0) throw new Error("Invalid amount");
+            if (!Number.isFinite(fee) || fee < 1) throw new Error("Fee must be at least 1");
+            if (!Number.isFinite(nonce) || nonce <= 0) throw new Error("Invalid nonce");
+            if (fee > amount) throw new Error("Fee must be <= amount");
+            if (txMemo.length > 256) throw new Error("Memo too long (max 256)");
+
             const draft: TxDraft = {
                 version: 1,
                 networkId: status.data.networkID,
                 from: wallet.address,
-                to: txTo.trim(),
-                amount: Number(txAmount),
-                fee: Number(txFee),
-                nonce: Number(txNonce),
+                to,
+                amount,
+                fee,
+                nonce,
                 timestamp: Math.floor(Date.now() / 1000),
                 memo: txMemo.trim() ? txMemo.trim() : undefined
             };
-
-            if (!draft.to) throw new Error("Recipient address required");
-            if (!Number.isFinite(draft.amount) || draft.amount <= 0) throw new Error("Invalid amount");
-            if (!Number.isFinite(draft.fee) || draft.fee < 0) throw new Error("Invalid fee");
-            if (!Number.isFinite(draft.nonce) || draft.nonce <= 0) throw new Error("Invalid nonce");
 
             const stx = await signDraft(draft, publicKeyRaw, privateKey);
             setSigned(stx);
@@ -183,8 +193,6 @@ export default function Wallet(): React.ReactElement {
                             <div className="rowBtns">
                                 <button className="btn primary" onClick={onCreate} disabled={busy}>Create Wallet</button>
                             </div>
-
-                            <p className="tiny muted">The private key is encrypted locally using PBKDF2 + AES-GCM and stored in this browser only.</p>
                         </>
                     )}
 
@@ -264,11 +272,11 @@ export default function Wallet(): React.ReactElement {
 
             <div className="card">
                 <h3>Create & Sign Transaction</h3>
-                <p className="muted">This creates a signed transaction draft and validates it via the node API.</p>
+                <p className="muted">Recipient address must be a valid Veltaros address (checksum verified).</p>
 
                 <label className="label">
                     To (recipient address)
-                    <input className="input mono" value={txTo} onChange={(e) => setTxTo(e.target.value)} placeholder="recipient address" />
+                    <input className="input mono" value={txTo} onChange={(e) => setTxTo(e.target.value)} placeholder="recipient address (24 bytes hex)" />
                 </label>
 
                 <div className="grid2">
@@ -302,15 +310,8 @@ export default function Wallet(): React.ReactElement {
                     </button>
                 </div>
 
-                {signed && (
-                    <>
-                        <p className="tiny muted">Signed TX ID: <span className="mono">{signed.txId}</span></p>
-                    </>
-                )}
-
-                {txResult && (
-                    <pre className="pre">{txResult}</pre>
-                )}
+                {signed && <p className="tiny muted">Signed TX ID: <span className="mono">{signed.txId}</span></p>}
+                {txResult && <pre className="pre">{txResult}</pre>}
             </div>
 
             <div className="card">

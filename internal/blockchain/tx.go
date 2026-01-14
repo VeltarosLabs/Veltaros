@@ -13,43 +13,42 @@ import (
 
 const (
 	TxVersion uint32 = 1
+
+	// Policy bounds (node-level, can be made configurable later)
+	MaxMemoLen       = 256
+	MaxFutureSkewSec = 5 * 60    // 5 minutes
+	MaxPastSkewSec   = 24 * 3600 // 24 hours
+	MinFee           = 1
+	MaxTxAmount      = ^uint64(0)
 )
 
-// TxDraft is the unsigned transaction intent. It is what gets hashed/signature-bound.
 type TxDraft struct {
 	Version   uint32 `json:"version"`
 	NetworkID string `json:"networkId"`
 
-	From string `json:"from"` // sender address
-	To   string `json:"to"`   // recipient address
+	From string `json:"from"`
+	To   string `json:"to"`
 
-	Amount uint64 `json:"amount"` // smallest unit
-	Fee    uint64 `json:"fee"`    // smallest unit
+	Amount uint64 `json:"amount"`
+	Fee    uint64 `json:"fee"`
 
-	Nonce     uint64 `json:"nonce"`     // anti-replay per-account/identity (ledger-defined later)
-	Timestamp int64  `json:"timestamp"` // unix sec
+	Nonce     uint64 `json:"nonce"`
+	Timestamp int64  `json:"timestamp"`
 
 	Memo string `json:"memo,omitempty"`
 }
 
-// SignedTx carries the draft plus the signer identity.
 type SignedTx struct {
-	Draft       TxDraft `json:"draft"`
-	PublicKeyHex string `json:"publicKeyHex"` // ed25519 public key hex (32 bytes)
-	SignatureHex string `json:"signatureHex"` // ed25519 signature hex (64 bytes)
-	TxID         string `json:"txId"`          // hex of tx hash (double-sha256 of canonical draft bytes)
+	Draft        TxDraft `json:"draft"`
+	PublicKeyHex string  `json:"publicKeyHex"` // ed25519 raw pubkey hex (32 bytes)
+	SignatureHex string  `json:"signatureHex"` // ed25519 signature hex (64 bytes)
+	TxID         string  `json:"txId"`         // hex doubleSha256(canonicalDraftBytes)
 }
 
-// CanonicalDraftBytes produces stable bytes for hashing/signing.
-// We keep a strict, minimal canonical JSON encoding: no whitespace, sorted keys via struct marshaling.
 func CanonicalDraftBytes(d TxDraft) ([]byte, error) {
-	// Enforce version at encoding time
 	if d.Version == 0 {
 		d.Version = TxVersion
 	}
-
-	// Marshal with stdlib: struct field order is stable; output is deterministic for same values.
-	// Important: do not use map encoding here.
 	b, err := json.Marshal(d)
 	if err != nil {
 		return nil, err
@@ -57,7 +56,6 @@ func CanonicalDraftBytes(d TxDraft) ([]byte, error) {
 	return b, nil
 }
 
-// TxHash = doubleSha256(canonicalDraftBytes)
 func TxHash(d TxDraft) ([32]byte, error) {
 	b, err := CanonicalDraftBytes(d)
 	if err != nil {
@@ -66,8 +64,6 @@ func TxHash(d TxDraft) ([32]byte, error) {
 	return vcrypto.DoubleSha256(b), nil
 }
 
-// SignatureMessage = sha256("veltaros-tx-sign" || networkID || txHash)
-// Domain separated and network-bound.
 func SignatureMessage(networkID string, txHash [32]byte) [32]byte {
 	domain := []byte("veltaros-tx-sign")
 	msg := make([]byte, 0, len(domain)+len(networkID)+32)
@@ -87,6 +83,7 @@ func SignDraft(priv ed25519.PrivateKey, d TxDraft) (SignedTx, error) {
 	if d.Version == 0 {
 		d.Version = TxVersion
 	}
+
 	h, err := TxHash(d)
 	if err != nil {
 		return SignedTx{}, err
@@ -104,27 +101,53 @@ func SignDraft(priv ed25519.PrivateKey, d TxDraft) (SignedTx, error) {
 }
 
 func ValidateSignedTx(st SignedTx) error {
-	if st.Draft.Version != TxVersion {
-		return fmt.Errorf("unsupported tx version: %d", st.Draft.Version)
+	d := st.Draft
+
+	if d.Version != TxVersion {
+		return fmt.Errorf("unsupported tx version: %d", d.Version)
 	}
-	if st.Draft.NetworkID == "" {
+	if d.NetworkID == "" {
 		return errors.New("networkId is required")
 	}
-	if st.Draft.From == "" || st.Draft.To == "" {
-		return errors.New("from/to required")
+
+	// Address format validation
+	if err := ValidateAddress(d.From); err != nil {
+		return fmt.Errorf("invalid from address: %w", err)
 	}
-	if st.Draft.Amount == 0 {
+	if err := ValidateAddress(d.To); err != nil {
+		return fmt.Errorf("invalid to address: %w", err)
+	}
+	if d.From == d.To {
+		return errors.New("from and to must differ")
+	}
+
+	if d.Amount == 0 || d.Amount > MaxTxAmount {
 		return errors.New("amount must be > 0")
 	}
-	if st.Draft.Fee > st.Draft.Amount {
+	if d.Fee < MinFee {
+		return fmt.Errorf("fee must be >= %d", MinFee)
+	}
+	if d.Fee > d.Amount {
 		return errors.New("fee must be <= amount")
 	}
-	if st.Draft.Timestamp <= 0 {
+	if d.Nonce == 0 {
+		return errors.New("nonce must be > 0")
+	}
+	if d.Timestamp <= 0 {
 		return errors.New("timestamp required")
 	}
-	// Basic memo length bound (DoS protection)
-	if len(st.Draft.Memo) > 256 {
+
+	if len(d.Memo) > MaxMemoLen {
 		return errors.New("memo too long")
+	}
+
+	// Timestamp skew policy
+	now := time.Now().UTC().Unix()
+	if d.Timestamp > now+MaxFutureSkewSec {
+		return errors.New("timestamp too far in future")
+	}
+	if d.Timestamp < now-MaxPastSkewSec {
+		return errors.New("timestamp too far in past")
 	}
 
 	pubBytes, err := hex.DecodeString(st.PublicKeyHex)
@@ -134,6 +157,7 @@ func ValidateSignedTx(st SignedTx) error {
 	if len(pubBytes) != ed25519.PublicKeySize {
 		return errors.New("invalid publicKeyHex size")
 	}
+
 	sigBytes, err := hex.DecodeString(st.SignatureHex)
 	if err != nil {
 		return errors.New("invalid signatureHex")
@@ -142,7 +166,7 @@ func ValidateSignedTx(st SignedTx) error {
 		return errors.New("invalid signatureHex size")
 	}
 
-	h, err := TxHash(st.Draft)
+	h, err := TxHash(d)
 	if err != nil {
 		return err
 	}
@@ -150,11 +174,10 @@ func ValidateSignedTx(st SignedTx) error {
 		return errors.New("txId mismatch")
 	}
 
-	sm := SignatureMessage(st.Draft.NetworkID, h)
+	sm := SignatureMessage(d.NetworkID, h)
 	if !ed25519.Verify(ed25519.PublicKey(pubBytes), sm[:], sigBytes) {
 		return errors.New("invalid signature")
 	}
 
-	// NOTE: Ledger checks (balance/nonce, etc.) come later.
 	return nil
 }

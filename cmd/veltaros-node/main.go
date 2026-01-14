@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/VeltarosLabs/Veltaros/internal/api"
 	"github.com/VeltarosLabs/Veltaros/internal/blockchain"
 	"github.com/VeltarosLabs/Veltaros/internal/config"
 	"github.com/VeltarosLabs/Veltaros/internal/logging"
@@ -110,6 +111,8 @@ func main() {
 func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 	mux := http.NewServeMux()
 
+	txLimiter := api.NewLimiter(2.0, 10.0, 1.0) // ~2 req/sec with burst 10, per IP
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":   true,
@@ -158,21 +161,14 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 			return
 		}
-		body, err := readBodyLimited(r.Body, 256*1024)
+		if !txLimiter.Allow(r) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate limited"})
+			return
+		}
+
+		tx, err := decodeSignedTx(r, rt.networkID)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-
-		var tx blockchain.SignedTx
-		if err := json.Unmarshal(body, &tx); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
-			return
-		}
-
-		// network hard check (node policy)
-		if tx.Draft.NetworkID != rt.networkID {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "networkId mismatch"})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
 
@@ -188,20 +184,14 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 			return
 		}
-		body, err := readBodyLimited(r.Body, 256*1024)
+		if !txLimiter.Allow(r) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate limited"})
+			return
+		}
+
+		tx, err := decodeSignedTx(r, rt.networkID)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
-			return
-		}
-
-		var tx blockchain.SignedTx
-		if err := json.Unmarshal(body, &tx); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
-			return
-		}
-
-		if tx.Draft.NetworkID != rt.networkID {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "networkId mismatch"})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
 
@@ -209,7 +199,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
 	})
 
@@ -230,6 +219,21 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 	}()
 
 	return srv
+}
+
+func decodeSignedTx(r *http.Request, networkID string) (blockchain.SignedTx, error) {
+	body, err := readBodyLimited(r.Body, 256*1024)
+	if err != nil {
+		return blockchain.SignedTx{}, err
+	}
+	var tx blockchain.SignedTx
+	if err := json.Unmarshal(body, &tx); err != nil {
+		return blockchain.SignedTx{}, errors.New("invalid json")
+	}
+	if tx.Draft.NetworkID != networkID {
+		return blockchain.SignedTx{}, errors.New("networkId mismatch")
+	}
+	return tx, nil
 }
 
 func securityHeaders(next http.Handler) http.Handler {
