@@ -39,11 +39,16 @@ type APIConfig struct {
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 	IdleTimeout  time.Duration
+
+	AllowedOrigins []string
+	APIKey         string
+	KeyOnValidate  bool
+	KeyOnBroadcast bool
 }
 
 type LogConfig struct {
-	Level  string // debug|info|warn|error
-	Format string // json|text
+	Level  string
+	Format string
 }
 
 type StorageConfig struct {
@@ -73,6 +78,11 @@ func Default() Config {
 			ReadTimeout:  10 * time.Second,
 			WriteTimeout: 10 * time.Second,
 			IdleTimeout:  60 * time.Second,
+
+			AllowedOrigins: []string{"http://127.0.0.1:5173", "http://localhost:5173"},
+			APIKey:         "",
+			KeyOnValidate:  false,
+			KeyOnBroadcast: false,
 		},
 		Log: LogConfig{
 			Level:  "info",
@@ -110,6 +120,11 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 		apiEnabled = fs.Bool("api.enabled", envOrBool("VELTAROS_API_ENABLED", cfg.API.Enabled), "Enable HTTP API")
 		apiListen  = fs.String("api.listen", envOr("VELTAROS_API_LISTEN", cfg.API.ListenAddr), "HTTP API listen address (ip:port)")
 
+		allowedOrigins = fs.String("api.allowedOrigins", envOr("VELTAROS_API_ALLOWED_ORIGINS", strings.Join(cfg.API.AllowedOrigins, ",")), "CSV allowlist for CORS origins")
+		apiKey         = fs.String("api.key", envOr("VELTAROS_API_KEY", cfg.API.APIKey), "Optional API key (sent via X-API-Key)")
+		keyOnValidate  = fs.Bool("api.keyOnValidate", envOrBool("VELTAROS_API_KEY_ON_VALIDATE", cfg.API.KeyOnValidate), "Require API key for /tx/validate")
+		keyOnBroadcast = fs.Bool("api.keyOnBroadcast", envOrBool("VELTAROS_API_KEY_ON_BROADCAST", cfg.API.KeyOnBroadcast), "Require API key for /tx/broadcast")
+
 		logLevel  = fs.String("log.level", envOr("VELTAROS_LOG_LEVEL", cfg.Log.Level), "Log level: debug|info|warn|error")
 		logFormat = fs.String("log.format", envOr("VELTAROS_LOG_FORMAT", cfg.Log.Format), "Log format: json|text")
 
@@ -123,7 +138,6 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 	cfg.Network.ListenAddr = strings.TrimSpace(*listenAddr)
 	cfg.Network.ExternalAddr = strings.TrimSpace(*externalAddr)
 	cfg.Network.MaxPeers = *maxPeers
-
 	cfg.Network.NetworkID = strings.TrimSpace(*networkID)
 	cfg.Network.IdentityKeyPath = strings.TrimSpace(*identityKey)
 	cfg.Network.IdentityRecordPath = strings.TrimSpace(*identityRecord)
@@ -133,6 +147,11 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 
 	cfg.API.Enabled = *apiEnabled
 	cfg.API.ListenAddr = strings.TrimSpace(*apiListen)
+	cfg.API.AllowedOrigins = splitCSV(strings.TrimSpace(*allowedOrigins))
+	cfg.API.APIKey = strings.TrimSpace(*apiKey)
+	cfg.API.KeyOnValidate = *keyOnValidate
+	cfg.API.KeyOnBroadcast = *keyOnBroadcast
+
 	cfg.Log.Level = strings.TrimSpace(*logLevel)
 	cfg.Log.Format = strings.TrimSpace(*logFormat)
 	cfg.Storage.DataDir = strings.TrimSpace(*dataDir)
@@ -189,9 +208,12 @@ func validate(cfg Config) error {
 	if cfg.API.Enabled && cfg.API.ListenAddr == "" {
 		return errors.New("api.listen must not be empty when api.enabled=true")
 	}
-	if cfg.Storage.DataDir == "" {
-		return errors.New("data.dir must not be empty")
+
+	// If key is set, at least one key-protected path should be enabled (or it's pointless).
+	if cfg.API.APIKey != "" && !cfg.API.KeyOnValidate && !cfg.API.KeyOnBroadcast {
+		return errors.New("api.key is set but neither api.keyOnValidate nor api.keyOnBroadcast is enabled")
 	}
+
 	return nil
 }
 

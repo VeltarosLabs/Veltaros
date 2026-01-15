@@ -31,6 +31,7 @@ type nodeRuntime struct {
 	store     *storage.Store
 	p2p       *p2p.Node
 	networkID string
+	apiCfg    config.APIConfig
 }
 
 func main() {
@@ -92,6 +93,7 @@ func main() {
 		store:     store,
 		p2p:       p2pNode,
 		networkID: cfg.Network.NetworkID,
+		apiCfg:    cfg.API,
 	}
 
 	var apiSrv *http.Server
@@ -110,7 +112,6 @@ func main() {
 
 func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 	mux := http.NewServeMux()
-
 	txLimiter := api.NewLimiter(2.0, 10.0, 1.0)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -211,13 +212,11 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			return
 		}
 
-		// De-dup
 		if rt.chain.MempoolHas(tx.TxID) {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID, "note": "already in mempool"})
 			return
 		}
 
-		// Nonce policy (strictly increasing per address)
 		if !rt.chain.ReserveNonce(tx.Draft.From, tx.Draft.Nonce) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"ok":            false,
@@ -236,13 +235,22 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
 	})
 
+	secured := api.SecurityMiddleware(api.SecurityConfig{
+		AllowedOrigins: rt.apiCfg.AllowedOrigins,
+		APIKey:         rt.apiCfg.APIKey,
+		RequireKeyFor: map[string]bool{
+			"/tx/validate":  rt.apiCfg.KeyOnValidate,
+			"/tx/broadcast": rt.apiCfg.KeyOnBroadcast,
+		},
+	}, mux)
+
 	srv := &http.Server{
 		Addr:              listen,
-		Handler:           securityHeaders(mux),
+		Handler:           secured,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      10 * time.Second,
-		IdleTimeout:       60 * time.Second,
+		ReadTimeout:       rt.apiCfg.ReadTimeout,
+		WriteTimeout:      rt.apiCfg.WriteTimeout,
+		IdleTimeout:       rt.apiCfg.IdleTimeout,
 	}
 
 	go func() {
@@ -268,16 +276,6 @@ func decodeSignedTx(r *http.Request, networkID string) (blockchain.SignedTx, err
 		return blockchain.SignedTx{}, errors.New("networkId mismatch")
 	}
 	return tx, nil
-}
-
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
