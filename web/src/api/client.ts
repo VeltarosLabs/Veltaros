@@ -1,5 +1,6 @@
 import type { Health, NodeStatus, PeerList, VersionInfo } from "./types";
 import type { MempoolResponse } from "./mempoolTypes";
+import type { AccountInfo } from "./accountTypes";
 import type { SignedTx } from "../tx/types";
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
@@ -77,6 +78,11 @@ export class VeltarosApiClient {
         return this.getJson<MempoolResponse>("/mempool", signal);
     }
 
+    async account(address: string, signal?: AbortSignal): Promise<AccountInfo> {
+        const safe = encodeURIComponent(address.trim());
+        return this.getJson<AccountInfo>(`/account/${safe}`, signal);
+    }
+
     async txValidate(tx: SignedTx, signal?: AbortSignal): Promise<TxValidateResponse> {
         return this.postJson<TxValidateResponse>("/tx/validate", tx, signal, true);
     }
@@ -129,7 +135,6 @@ export class VeltarosApiClient {
         const json = safeParseJson(text);
 
         if (!res.ok) {
-            // if server gave JSON (like {"ok":false,"error":"unauthorized"}), return it so UI can show message
             if (json) return json as T;
             throw new VeltarosApiError(`HTTP ${res.status} for ${path}${text ? `: ${text.slice(0, 200)}` : ""}`, res.status, url);
         }

@@ -3,6 +3,7 @@ import { env } from "../config/env";
 import { VeltarosApiClient, type TxBroadcastResponse, type TxValidateResponse } from "../api/client";
 import type { NodeStatus, PeerList } from "../api/types";
 import type { MempoolResponse } from "../api/mempoolTypes";
+import type { AccountInfo } from "../api/accountTypes";
 import { usePoll } from "../hooks/usePoll";
 import { useWallet } from "../wallet/useWallet";
 import Card from "../components/Card";
@@ -39,12 +40,6 @@ async function copyToClipboard(text: string): Promise<void> {
     await navigator.clipboard.writeText(text);
 }
 
-function asNumberString(n: number | undefined): string | null {
-    if (typeof n !== "number") return null;
-    if (!Number.isFinite(n)) return null;
-    return String(Math.max(0, Math.floor(n)));
-}
-
 export default function Wallet(): React.ReactElement {
     const api = useMemo(() => new VeltarosApiClient(env.nodeApiBaseUrl, env.apiKey), []);
     const status = usePoll<NodeStatus>((signal) => api.status(signal), 2500);
@@ -56,6 +51,10 @@ export default function Wallet(): React.ReactElement {
     const [section, setSection] = useState<Section>("vault");
     const [busy, setBusy] = useState(false);
     const [notice, setNotice] = useState<string | null>(null);
+
+    // Account info (nonce guidance)
+    const [account, setAccount] = useState<AccountInfo | null>(null);
+    const [accountErr, setAccountErr] = useState<string | null>(null);
 
     // Vault
     const [pwd, setPwd] = useState("");
@@ -103,6 +102,21 @@ export default function Wallet(): React.ReactElement {
         }
     };
 
+    const refreshAccount = async () => {
+        setAccountErr(null);
+        setAccount(null);
+
+        if (wallet.status !== "unlocked") return;
+        try {
+            const info = await api.account(wallet.address);
+            setAccount(info);
+            // update nonce input if user hasn’t changed it much
+            setTxNonce(String(info.expectedNonce));
+        } catch (e) {
+            setAccountErr(e instanceof Error ? e.message : "Failed to load account");
+        }
+    };
+
     const onCreate = async () => {
         setNotice(null);
         if (pwd !== pwd2) {
@@ -115,6 +129,7 @@ export default function Wallet(): React.ReactElement {
             setPwd("");
             setPwd2("");
             show("Wallet created");
+            await refreshAccount();
         } catch (e) {
             fail(e);
         } finally {
@@ -129,6 +144,7 @@ export default function Wallet(): React.ReactElement {
             await actions.unlock(pwd);
             setPwd("");
             show("Unlocked");
+            await refreshAccount();
         } catch (e) {
             fail(e);
         } finally {
@@ -140,6 +156,8 @@ export default function Wallet(): React.ReactElement {
         actions.lock();
         setSigned(null);
         setTxResult(null);
+        setAccount(null);
+        setAccountErr(null);
         show("Locked");
     };
 
@@ -148,6 +166,8 @@ export default function Wallet(): React.ReactElement {
             actions.reset();
             setSigned(null);
             setTxResult(null);
+            setAccount(null);
+            setAccountErr(null);
             show("Vault deleted");
         }
     };
@@ -196,32 +216,8 @@ export default function Wallet(): React.ReactElement {
             return;
         }
 
-        // Optional: ask node for expected nonce based on current state
-        try {
-            const v: TxValidateResponse = await api.txValidate({
-                draft: {
-                    version: 1,
-                    networkId: status.data.networkID,
-                    from: wallet.address,
-                    to,
-                    amount,
-                    fee,
-                    nonce,
-                    timestamp: Math.floor(Date.now() / 1000),
-                    memo: txMemo.trim() ? txMemo.trim() : undefined
-                },
-                publicKeyHex: wallet.publicKeyRawHex,
-                signatureHex: "00".repeat(64), // placeholder, server will fail signature but will still return nonce data only if ok; so ignore here
-                txId: "00".repeat(32)
-            } as unknown as SignedTx);
-
-            if ("ok" in v && v.ok && typeof v.expectedNonce === "number") {
-                const suggested = asNumberString(v.expectedNonce);
-                if (suggested) setTxNonce(suggested);
-            }
-        } catch {
-            // ignore; we only use this as a convenience
-        }
+        // Refresh account nonce before signing if possible
+        await refreshAccount();
 
         setSignPwd("");
         setSignOpen(true);
@@ -268,15 +264,13 @@ export default function Wallet(): React.ReactElement {
             setTxResult(JSON.stringify(res, null, 2));
 
             if ("ok" in res && res.ok) {
-                upsertHistory({ ...base, status: "validated", note: `Validated. Expected nonce: ${res.expectedNonce}` });
+                upsertHistory({ ...base, status: "validated", note: `Validated. Next nonce: ${res.expectedNonce}` });
                 refreshHistory();
-
-                const suggested = asNumberString(res.expectedNonce);
-                if (suggested) setTxNonce(suggested);
-
+                setTxNonce(String(res.expectedNonce));
                 setSignOpen(false);
                 setSignPwd("");
                 show("Signed and validated");
+                await refreshAccount();
                 return;
             }
 
@@ -310,18 +304,13 @@ export default function Wallet(): React.ReactElement {
                 });
                 refreshHistory();
                 show(res.note ? res.note : "Broadcast accepted");
+                await refreshAccount();
                 return;
             }
 
-            // If nonce guidance is present, help the user
             if (typeof res.expectedNonce === "number") {
-                const suggested = asNumberString(res.expectedNonce);
-                if (suggested) {
-                    setTxNonce(suggested);
-                    setNotice(`${res.error}. Suggested nonce: ${suggested}`);
-                } else {
-                    setNotice(res.error);
-                }
+                setTxNonce(String(res.expectedNonce));
+                setNotice(`${res.error}. Suggested nonce: ${res.expectedNonce}`);
             } else {
                 setNotice(res.error);
             }
@@ -413,7 +402,34 @@ export default function Wallet(): React.ReactElement {
 
                                 <div className="rowBtns">
                                     <button className="btn" onClick={() => void onCopy(wallet.address)}>Copy address</button>
+                                    <button className="btn" onClick={() => void refreshAccount()} disabled={busy}>
+                                        Refresh account
+                                    </button>
                                     <button className="btn danger" onClick={onReset}>Delete</button>
+                                </div>
+
+                                <div className="alertInline">
+                                    <div className="walletSectionTitle">Account</div>
+                                    <p className="walletHint">Nonce tracking is used to prevent replay. Your next transaction should use the expected nonce.</p>
+
+                                    {accountErr && <div className="muted">{accountErr}</div>}
+
+                                    {account && (
+                                        <div className="kv">
+                                            <div className="row">
+                                                <span>Last nonce</span>
+                                                <span className="value mono">{account.lastNonce}</span>
+                                            </div>
+                                            <div className="row">
+                                                <span>Expected nonce</span>
+                                                <span className="value mono">{account.expectedNonce}</span>
+                                            </div>
+                                            <div className="row">
+                                                <span>Balance</span>
+                                                <span className="value mono">{account.balance}</span>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </>
                         )}
@@ -481,6 +497,13 @@ export default function Wallet(): React.ReactElement {
                             </label>
                         </div>
 
+                        {account && (
+                            <div className="alertInline">
+                                <div className="tiny muted">Expected nonce</div>
+                                <div className="mono">{account.expectedNonce}</div>
+                            </div>
+                        )}
+
                         {signed && (
                             <div className="note">
                                 <div className="tiny muted">Signed TX ID</div>
@@ -529,7 +552,7 @@ export default function Wallet(): React.ReactElement {
                 <div className="walletGrid spanAll">
                     <Card title="Node" subtitle="Live node status from your running Veltaros node.">
                         {status.loading && <p className="muted">Loading…</p>}
-                        {status.error && <p className="error">Error: {status.error}</p>}
+                        {status.error && <p className="muted">{status.error}</p>}
 
                         {status.data && (
                             <div className="kv">
@@ -559,7 +582,7 @@ export default function Wallet(): React.ReactElement {
 
                     <Card title="Mempool" subtitle="Transactions accepted by the node.">
                         {mempool.loading && <p className="muted">Loading…</p>}
-                        {mempool.error && <p className="error">Error: {mempool.error}</p>}
+                        {mempool.error && <p className="muted">{mempool.error}</p>}
 
                         {mempool.data && (
                             <>
@@ -599,7 +622,7 @@ export default function Wallet(): React.ReactElement {
 
                     <Card title="Peers" subtitle="Connected peers and connection details.">
                         {peers.loading && <p className="muted">Loading…</p>}
-                        {peers.error && <p className="error">Error: {peers.error}</p>}
+                        {peers.error && <p className="muted">{peers.error}</p>}
 
                         {peers.data && (
                             <>
