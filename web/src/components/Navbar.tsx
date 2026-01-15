@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle";
-import logoUrl from "../assets/veltaros-mark.svg";
+import logoPng from "../assets/logo.png";
 
 type Props = {
     theme: "light" | "dark";
@@ -28,7 +28,7 @@ export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElem
         <header className="nav">
             <div className="navInner">
                 <Link to="/" className="brand" aria-label="Veltaros">
-                    <img className="brandLogo" src={logoUrl} alt="Veltaros logo" />
+                    <img className="brandLogo" src={logoPng} alt="Veltaros logo" />
                     <span className="brandText">Veltaros</span>
                 </Link>
 

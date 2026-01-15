@@ -6,23 +6,12 @@ type LinkItem = {
     icon: React.ReactNode;
 };
 
-function IconInstagram() {
+function IconGitHub() {
     return (
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
                 fill="currentColor"
-                d="M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5Zm10 2H7a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3Zm-5 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm6.5-2.25a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z"
-            />
-        </svg>
-    );
-}
-
-function IconFacebook() {
-    return (
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path
-                fill="currentColor"
-                d="M13 22v-8h3l1-4h-4V7.5c0-1 .3-1.5 1.7-1.5H17V2.1c-.6-.1-1.9-.1-3.4-.1C10.9 2 9 3.6 9 6.7V10H6v4h3v8h4Z"
+                d="M12 2a10 10 0 0 0-3.16 19.49c.5.1.68-.22.68-.48v-1.7c-2.77.6-3.35-1.17-3.35-1.17-.45-1.14-1.1-1.45-1.1-1.45-.9-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.33 1.09 2.9.83.09-.65.35-1.09.63-1.34-2.21-.25-4.53-1.1-4.53-4.9 0-1.08.39-1.96 1.03-2.65-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02A9.5 9.5 0 0 1 12 6.8c.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.69 1.03 1.57 1.03 2.65 0 3.81-2.32 4.65-4.54 4.9.36.31.68.92.68 1.86v2.75c0 .26.18.59.69.48A10 10 0 0 0 12 2Z"
             />
         </svg>
     );
@@ -39,41 +28,35 @@ function IconX() {
     );
 }
 
-function IconYouTube() {
+function IconReddit() {
     return (
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
             <path
                 fill="currentColor"
-                d="M21.6 7.2a3 3 0 0 0-2.1-2.1C17.6 4.6 12 4.6 12 4.6s-5.6 0-7.5.5A3 3 0 0 0 2.4 7.2 31.4 31.4 0 0 0 2 12a31.4 31.4 0 0 0 .4 4.8 3 3 0 0 0 2.1 2.1c1.9.5 7.5.5 7.5.5s5.6 0 7.5-.5a3 3 0 0 0 2.1-2.1A31.4 31.4 0 0 0 22 12a31.4 31.4 0 0 0-.4-4.8ZM10 15.5v-7l6 3.5-6 3.5Z"
-            />
-        </svg>
-    );
-}
-
-function IconTikTok() {
-    return (
-        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-            <path
-                fill="currentColor"
-                d="M16.6 5.6c-1-.6-1.7-1.5-2-2.6h-2.7v12.1a2.4 2.4 0 1 1-2-2.4c.2 0 .4 0 .6.1V9.9c-.2 0-.4-.1-.6-.1A5.2 5.2 0 1 0 13 15.1V8.3c1.1.8 2.4 1.2 3.8 1.2V6.8c-.7 0-1.4-.2-2.2-.7Z"
+                d="M20 12.2c0-1.1-.9-2-2-2-.5 0-1 .2-1.3.5-1.3-.9-3.1-1.5-5.1-1.6l1-4.6 3.2.7c0 1 .8 1.8 1.8 1.8 1 0 1.8-.8 1.8-1.8S19.6 3.4 18.6 3.4c-.7 0-1.3.4-1.6 1l-4-.9c-.5-.1-1 .2-1.1.7l-1.2 5.4c-2 .1-3.7.7-5.1 1.6-.4-.3-.8-.5-1.3-.5-1.1 0-2 .9-2 2 0 .8.5 1.5 1.2 1.8 0 .2-.1.5-.1.7 0 3 3.6 5.4 8 5.4s8-2.4 8-5.4c0-.2 0-.5-.1-.7.7-.3 1.2-1 1.2-1.8ZM8.7 15.7c-.7 0-1.2-.5-1.2-1.2s.5-1.2 1.2-1.2 1.2.5 1.2 1.2-.5 1.2-1.2 1.2Zm6.6 0c-.7 0-1.2-.5-1.2-1.2s.5-1.2 1.2-1.2 1.2.5 1.2 1.2-.5 1.2-1.2 1.2Zm-8 2.4c1.1 1 2.8 1.5 4.7 1.5s3.6-.6 4.7-1.5c.3-.3.3-.8 0-1.1-.3-.3-.8-.3-1.1 0-.8.7-2.1 1.1-3.6 1.1s-2.8-.4-3.6-1.1c-.3-.3-.8-.3-1.1 0-.3.3-.3.8 0 1.1Z"
             />
         </svg>
     );
 }
 
 const links: LinkItem[] = [
-    { label: "Instagram", href: "https://instagram.com", icon: <IconInstagram /> },
-    { label: "Facebook", href: "https://facebook.com", icon: <IconFacebook /> },
-    { label: "Twitter/X", href: "https://twitter.com", icon: <IconX /> },
-    { label: "YouTube", href: "https://youtube.com", icon: <IconYouTube /> },
-    { label: "TikTok", href: "https://tiktok.com", icon: <IconTikTok /> }
+    { label: "GitHub", href: "https://github.com/VeltarosLabs", icon: <IconGitHub /> },
+    { label: "X", href: "https://x.com/veltaros", icon: <IconX /> },
+    { label: "Reddit", href: "https://www.reddit.com/r/Veltaros/", icon: <IconReddit /> }
 ];
 
 export default function SocialLinks(): React.ReactElement {
     return (
         <div className="socialRow" aria-label="Social links">
             {links.map((l) => (
-                <a key={l.label} className="socialLink" href={l.href} target="_blank" rel="noreferrer noopener" aria-label={l.label}>
+                <a
+                    key={l.label}
+                    className="socialLink"
+                    href={l.href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    aria-label={l.label}
+                >
                     {l.icon}
                     <span className="socialLabel">{l.label}</span>
                 </a>
