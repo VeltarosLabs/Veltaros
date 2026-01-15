@@ -12,15 +12,19 @@ export default function App(): React.ReactElement {
 
     return (
         <div className="appShell">
+            <a href="#main-content" className="skipLink">
+                Skip to content
+            </a>
+
             <Navbar theme={theme} onToggleTheme={toggle} />
 
-            <div className="container main">
+            <main id="main-content" className="container main" role="main" tabIndex={-1}>
                 <Routes>
                     <Route path="/" element={<Landing />} />
                     <Route path="/wallet" element={<Wallet />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
-            </div>
+            </main>
 
             <footer className="siteFooter">
                 <div className="container footerWrap">

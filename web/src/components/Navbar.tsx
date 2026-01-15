@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Link, NavLink } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle";
 import logoPng from "../assets/logo.png";
 
@@ -15,14 +15,60 @@ const navLinks = [
 
 export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElement {
     const [open, setOpen] = useState(false);
+    const loc = useLocation();
+    const menuRef = useRef<HTMLElement | null>(null);
+    const toggleRef = useRef<HTMLButtonElement | null>(null);
 
+    // Close menu on route change
     useEffect(() => {
-        const onResize = () => {
-            if (window.innerWidth > 720) setOpen(false);
+        setOpen(false);
+    }, [loc.pathname]);
+
+    // Scroll lock while menu is open (mobile)
+    useEffect(() => {
+        if (!open) {
+            document.body.classList.remove("noScroll");
+            return;
+        }
+        document.body.classList.add("noScroll");
+        return () => document.body.classList.remove("noScroll");
+    }, [open]);
+
+    // Close menu when clicking outside
+    useEffect(() => {
+        if (!open) return;
+
+        const onDown = (e: MouseEvent | TouchEvent) => {
+            const t = e.target as Node | null;
+            if (!t) return;
+
+            const menu = menuRef.current;
+            const toggle = toggleRef.current;
+
+            const insideMenu = menu ? menu.contains(t) : false;
+            const insideToggle = toggle ? toggle.contains(t) : false;
+
+            if (!insideMenu && !insideToggle) setOpen(false);
         };
-        window.addEventListener("resize", onResize);
-        return () => window.removeEventListener("resize", onResize);
-    }, []);
+
+        window.addEventListener("mousedown", onDown);
+        window.addEventListener("touchstart", onDown);
+        return () => {
+            window.removeEventListener("mousedown", onDown);
+            window.removeEventListener("touchstart", onDown);
+        };
+    }, [open]);
+
+    // Close menu on Escape
+    useEffect(() => {
+        if (!open) return;
+
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setOpen(false);
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [open]);
 
     return (
         <header className="nav">
@@ -36,6 +82,7 @@ export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElem
                     <ThemeToggle theme={theme} onToggle={onToggleTheme} />
 
                     <button
+                        ref={toggleRef}
                         type="button"
                         className="navToggle"
                         aria-label={open ? "Close menu" : "Open menu"}
@@ -46,7 +93,13 @@ export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElem
                     </button>
                 </div>
 
-                <nav className={`navLinks ${open ? "open" : ""}`.trim()} aria-label="Primary navigation">
+                <nav
+                    ref={(el) => {
+                        menuRef.current = el;
+                    }}
+                    className={`navLinks ${open ? "open" : ""}`.trim()}
+                    aria-label="Primary navigation"
+                >
                     {navLinks.map((l) => (
                         <NavLink key={l.to} to={l.to} end={l.to === "/"} className={({ isActive }) => (isActive ? "active" : "")}>
                             {l.label}
