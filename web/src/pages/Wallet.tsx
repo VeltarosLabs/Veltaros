@@ -40,6 +40,11 @@ async function copyToClipboard(text: string): Promise<void> {
     await navigator.clipboard.writeText(text);
 }
 
+function fmtAmount(n: number): string {
+    if (!Number.isFinite(n)) return "0";
+    return String(Math.max(0, Math.floor(n)));
+}
+
 export default function Wallet(): React.ReactElement {
     const api = useMemo(() => new VeltarosApiClient(env.nodeApiBaseUrl, env.apiKey), []);
     const status = usePoll<NodeStatus>((signal) => api.status(signal), 2500);
@@ -52,9 +57,13 @@ export default function Wallet(): React.ReactElement {
     const [busy, setBusy] = useState(false);
     const [notice, setNotice] = useState<string | null>(null);
 
-    // Account info (nonce guidance)
+    // Account info
     const [account, setAccount] = useState<AccountInfo | null>(null);
     const [accountErr, setAccountErr] = useState<string | null>(null);
+
+    // Faucet (optional)
+    const [faucetAvailable, setFaucetAvailable] = useState<boolean | null>(null);
+    const [faucetAmount, setFaucetAmount] = useState("100000");
 
     // Vault
     const [pwd, setPwd] = useState("");
@@ -110,10 +119,71 @@ export default function Wallet(): React.ReactElement {
         try {
             const info = await api.account(wallet.address);
             setAccount(info);
-            // update nonce input if user hasn’t changed it much
             setTxNonce(String(info.expectedNonce));
         } catch (e) {
             setAccountErr(e instanceof Error ? e.message : "Failed to load account");
+        }
+    };
+
+    const detectFaucet = async () => {
+        // If node doesn't have faucet enabled, it returns 404.
+        // We detect once per unlock to decide whether to show the panel.
+        if (wallet.status !== "unlocked") return;
+
+        try {
+            const res = await fetch(`${env.nodeApiBaseUrl.replace(/\/+$/, "")}/faucet`, { method: "GET" });
+            // Our node returns 404 for disabled faucet; if it exists, GET will be method not allowed (405) or similar.
+            if (res.status === 404) setFaucetAvailable(false);
+            else setFaucetAvailable(true);
+        } catch {
+            setFaucetAvailable(false);
+        }
+    };
+
+    const onFaucet = async () => {
+        if (wallet.status !== "unlocked") {
+            setNotice("Unlock your wallet first");
+            return;
+        }
+
+        const amt = Number(faucetAmount);
+        if (!Number.isFinite(amt) || amt <= 0) {
+            setNotice("Invalid faucet amount");
+            return;
+        }
+
+        setBusy(true);
+        setNotice(null);
+        try {
+            const url = `${env.nodeApiBaseUrl.replace(/\/+$/, "")}/faucet`;
+            const headers: Record<string, string> = { "Content-Type": "application/json" };
+            if (env.apiKey) headers["X-API-Key"] = env.apiKey;
+
+            const res = await fetch(url, {
+                method: "POST",
+                headers,
+                body: JSON.stringify({ address: wallet.address, amount: Math.floor(amt) })
+            });
+
+            const text = await res.text();
+            let json: any = null;
+            try {
+                json = JSON.parse(text);
+            } catch {
+                json = null;
+            }
+
+            if (!res.ok) {
+                const msg = json?.error ? String(json.error) : `Faucet error (${res.status})`;
+                throw new Error(msg);
+            }
+
+            show("Balance updated");
+            await refreshAccount();
+        } catch (e) {
+            fail(e);
+        } finally {
+            setBusy(false);
         }
     };
 
@@ -130,6 +200,7 @@ export default function Wallet(): React.ReactElement {
             setPwd2("");
             show("Wallet created");
             await refreshAccount();
+            await detectFaucet();
         } catch (e) {
             fail(e);
         } finally {
@@ -145,6 +216,7 @@ export default function Wallet(): React.ReactElement {
             setPwd("");
             show("Unlocked");
             await refreshAccount();
+            await detectFaucet();
         } catch (e) {
             fail(e);
         } finally {
@@ -158,6 +230,7 @@ export default function Wallet(): React.ReactElement {
         setTxResult(null);
         setAccount(null);
         setAccountErr(null);
+        setFaucetAvailable(null);
         show("Locked");
     };
 
@@ -168,6 +241,7 @@ export default function Wallet(): React.ReactElement {
             setTxResult(null);
             setAccount(null);
             setAccountErr(null);
+            setFaucetAvailable(null);
             show("Vault deleted");
         }
     };
@@ -216,8 +290,13 @@ export default function Wallet(): React.ReactElement {
             return;
         }
 
-        // Refresh account nonce before signing if possible
         await refreshAccount();
+
+        // Balance guidance
+        if (account && account.spendableBalance < amount) {
+            setNotice(`Insufficient spendable balance. Spendable: ${fmtAmount(account.spendableBalance)}`);
+            return;
+        }
 
         setSignPwd("");
         setSignOpen(true);
@@ -394,10 +473,6 @@ export default function Wallet(): React.ReactElement {
                                         <span>Address</span>
                                         <span className="value mono">{wallet.address}</span>
                                     </div>
-                                    <div className="row">
-                                        <span>Fingerprint</span>
-                                        <span className="value mono">{wallet.publicKeyFingerprintHex.slice(0, 28)}…</span>
-                                    </div>
                                 </div>
 
                                 <div className="rowBtns">
@@ -410,12 +485,24 @@ export default function Wallet(): React.ReactElement {
 
                                 <div className="alertInline">
                                     <div className="walletSectionTitle">Account</div>
-                                    <p className="walletHint">Nonce tracking is used to prevent replay. Your next transaction should use the expected nonce.</p>
+                                    <p className="walletHint">Balances are local to the node’s current ledger state (early phase).</p>
 
                                     {accountErr && <div className="muted">{accountErr}</div>}
 
                                     {account && (
                                         <div className="kv">
+                                            <div className="row">
+                                                <span>Confirmed</span>
+                                                <span className="value mono">{fmtAmount(account.confirmedBalance)}</span>
+                                            </div>
+                                            <div className="row">
+                                                <span>Pending out</span>
+                                                <span className="value mono">{fmtAmount(account.pendingOut)}</span>
+                                            </div>
+                                            <div className="row">
+                                                <span>Spendable</span>
+                                                <span className="value mono">{fmtAmount(account.spendableBalance)}</span>
+                                            </div>
                                             <div className="row">
                                                 <span>Last nonce</span>
                                                 <span className="value mono">{account.lastNonce}</span>
@@ -424,9 +511,23 @@ export default function Wallet(): React.ReactElement {
                                                 <span>Expected nonce</span>
                                                 <span className="value mono">{account.expectedNonce}</span>
                                             </div>
-                                            <div className="row">
-                                                <span>Balance</span>
-                                                <span className="value mono">{account.balance}</span>
+                                        </div>
+                                    )}
+
+                                    {faucetAvailable === true && (
+                                        <div className="alertInline" style={{ marginTop: "0.9rem" }}>
+                                            <div className="walletSectionTitle">Faucet</div>
+                                            <p className="walletHint">Credit your address for testing.</p>
+
+                                            <label className="label">
+                                                Amount
+                                                <input className="input mono" value={faucetAmount} onChange={(e) => setFaucetAmount(e.target.value)} />
+                                            </label>
+
+                                            <div className="rowBtns">
+                                                <button className="btn primary" onClick={() => void onFaucet()} disabled={busy}>
+                                                    Add funds
+                                                </button>
                                             </div>
                                         </div>
                                     )}
@@ -499,8 +600,8 @@ export default function Wallet(): React.ReactElement {
 
                         {account && (
                             <div className="alertInline">
-                                <div className="tiny muted">Expected nonce</div>
-                                <div className="mono">{account.expectedNonce}</div>
+                                <div className="tiny muted">Spendable / Expected nonce</div>
+                                <div className="mono">{fmtAmount(account.spendableBalance)} / {account.expectedNonce}</div>
                             </div>
                         )}
 

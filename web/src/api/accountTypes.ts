@@ -2,5 +2,8 @@ export type AccountInfo = {
     address: string;
     lastNonce: number;
     expectedNonce: number;
-    balance: string;
+
+    confirmedBalance: number;
+    pendingOut: number;
+    spendableBalance: number;
 };
