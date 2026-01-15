@@ -10,7 +10,7 @@ type Chain struct {
 	height  uint64
 
 	mu      sync.RWMutex
-	mempool map[string]SignedTx // txId -> tx
+	mempool map[string]SignedTx
 
 	nonces     *NonceTracker
 	nonceStore *NonceStore
@@ -71,6 +71,20 @@ func (c *Chain) MempoolCount() int {
 	return len(c.mempool)
 }
 
+// MempoolDrain returns all current mempool txs and clears the mempool.
+// Used by dev/testnet block production.
+func (c *Chain) MempoolDrain() []SignedTx {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	out := make([]SignedTx, 0, len(c.mempool))
+	for _, tx := range c.mempool {
+		out = append(out, tx)
+	}
+	c.mempool = make(map[string]SignedTx)
+	return out
+}
+
 func (c *Chain) LastNonce(addr string) uint64 {
 	return c.nonces.Get(addr)
 }
@@ -83,7 +97,6 @@ func (c *Chain) ReserveNonce(addr string, nonce uint64) bool {
 	return c.nonces.CheckAndUpdate(addr, nonce)
 }
 
-// LoadNonceState restores last nonces from disk.
 func (c *Chain) LoadNonceState() error {
 	if c.nonceStore == nil {
 		return nil
@@ -96,7 +109,6 @@ func (c *Chain) LoadNonceState() error {
 	return nil
 }
 
-// SaveNonceState persists last nonces to disk.
 func (c *Chain) SaveNonceState() error {
 	if c.nonceStore == nil {
 		return nil
