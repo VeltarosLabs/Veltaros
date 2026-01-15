@@ -1,106 +1,152 @@
 import React from "react";
-import Card from "../components/Card";
-import logoUrl from "../assets/veltaros-mark.svg";
 import { Link } from "react-router-dom";
+import logoPng from "../assets/logo.png";
+import heroImg from "../assets/hero.jpg";
+import SocialLinks from "../components/SocialLinks";
+import "../styles/landing.css";
 
 export default function Landing(): React.ReactElement {
     return (
-        <section className="page">
-            <div className="hero">
-                <div className="heroLeft">
-                    <div className="badgeRow">
-                        <span className="pill">Veltaros Network</span>
-                        <span className="pill subtle">Secure • Fast • Transparent</span>
-                    </div>
+        <main className="landing">
+            {/* HERO */}
+            <section
+                className="hero"
+                style={{ backgroundImage: `url(${heroImg})` }}
+            >
+                <div className="heroOverlay" />
 
-                    <h1 className="heroTitle">
-                        Veltaros
-                        <span className="heroTitleSub"> — modern decentralized digital currency</span>
-                    </h1>
+                <div className="heroContent">
+                    <img
+                        src={logoPng}
+                        alt="Veltaros logo"
+                        className="heroLogo"
+                    />
 
+                    <h1 className="heroTitle">Veltaros</h1>
                     <p className="heroSubtitle">
-                        A full-stack blockchain ecosystem: a node that powers the network and a clean wallet experience designed for
-                        real-world use.
+                        A decentralized digital currency focused on security, transparency,
+                        and long-term sustainability.
                     </p>
 
                     <div className="heroActions">
-                        <Link className="btn primary" to="/wallet">
+                        <Link to="/wallet" className="btn primary">
                             Open Wallet
                         </Link>
-                        <a className="btn" href="#features">
-                            Explore Features
+                        <a
+                            href="#vision"
+                            className="btn ghost"
+                        >
+                            Learn More
                         </a>
                     </div>
+                </div>
+            </section>
 
-                    <div className="heroStats">
-                        <div className="stat">
-                            <div className="statK">Network</div>
-                            <div className="statV">Peer discovery, handshake verification, scoring</div>
-                        </div>
-                        <div className="stat">
-                            <div className="statK">Wallet</div>
-                            <div className="statV">Local encrypted vault, signed transactions</div>
-                        </div>
-                        <div className="stat">
-                            <div className="statK">Security</div>
-                            <div className="statV">Strict validation, rate-limiting, resilient defaults</div>
-                        </div>
+            {/* VISION */}
+            <section id="vision" className="section">
+                <header className="sectionHeader">
+                    <h2>Vision</h2>
+                    <p>
+                        Veltaros is built as a complete blockchain ecosystem — not an
+                        experiment, not a demo.
+                    </p>
+                </header>
+
+                <div className="cardGrid">
+                    <div className="card">
+                        <h3>Decentralized by Design</h3>
+                        <p>
+                            A peer-to-peer network with independent nodes, transparent
+                            consensus, and no central authority.
+                        </p>
+                    </div>
+
+                    <div className="card">
+                        <h3>Security First</h3>
+                        <p>
+                            Modern cryptography, signed transactions, replay protection,
+                            and strict validation rules at the protocol level.
+                        </p>
+                    </div>
+
+                    <div className="card">
+                        <h3>Built for the Long Term</h3>
+                        <p>
+                            Clean architecture, audited logic, and a focus on maintainability
+                            rather than hype.
+                        </p>
                     </div>
                 </div>
+            </section>
 
-                <div className="heroRight" aria-hidden="true">
-                    <div className="heroMarkWrap">
-                        <img className="heroMark" src={logoUrl} alt="" />
-                        <div className="heroGlow" />
+            {/* TECHNOLOGY */}
+            <section className="section alt">
+                <header className="sectionHeader">
+                    <h2>Technology</h2>
+                    <p>
+                        A full-stack blockchain system designed for real-world use.
+                    </p>
+                </header>
+
+                <div className="cardGrid">
+                    <div className="card">
+                        <h3>Core Engine</h3>
+                        <p>
+                            Written in Go for performance, concurrency, and reliability.
+                            Includes networking, consensus, and ledger logic.
+                        </p>
+                    </div>
+
+                    <div className="card">
+                        <h3>Wallet & Interface</h3>
+                        <p>
+                            A modern web wallet built with React, designed for clarity,
+                            safety, and ease of use across all devices.
+                        </p>
+                    </div>
+
+                    <div className="card">
+                        <h3>Open Ecosystem</h3>
+                        <p>
+                            Modular architecture that allows future tools, explorers,
+                            and integrations to grow naturally.
+                        </p>
                     </div>
                 </div>
-            </div>
+            </section>
 
-            <div id="features" className="sectionHeader">
-                <h2>What you can do</h2>
-                <p className="muted">Choose where you want to start.</p>
-            </div>
+            {/* CALL TO ACTION */}
+            <section className="section cta">
+                <h2>Start Using Veltaros</h2>
+                <p>
+                    Create a wallet, explore the network, and participate in a
+                    decentralized financial system built with intention.
+                </p>
 
-            <div className="cardGrid">
-                <Card title="Wallet" subtitle="Create and manage your local wallet, then sign transactions.">
-                    <ul className="list">
-                        <li>Encrypted vault (password protected)</li>
-                        <li>Receive address with copy action</li>
-                        <li>Draft, sign, validate, broadcast transactions</li>
-                    </ul>
-                    <div className="cardActions">
-                        <Link className="btn small primary" to="/wallet">
-                            Open Wallet
-                        </Link>
+                <Link to="/wallet" className="btn primary large">
+                    Get Started
+                </Link>
+            </section>
+
+            {/* FOOTER */}
+            <footer className="footer">
+                <div className="footerInner">
+                    <div className="footerBrand">
+                        <img
+                            src={logoPng}
+                            alt="Veltaros logo"
+                            className="footerLogo"
+                        />
+                        <span className="footerName">Veltaros</span>
                     </div>
-                </Card>
 
-                <Card title="Network" subtitle="View the node’s view of the network and transaction pool.">
-                    <ul className="list">
-                        <li>Peer list with verification and scoring</li>
-                        <li>Mempool viewer</li>
-                        <li>Live node status</li>
-                    </ul>
-                    <div className="cardActions">
-                        <Link className="btn small" to="/wallet">
-                            Open Network View
-                        </Link>
-                    </div>
-                </Card>
+                    <SocialLinks />
 
-                <Card title="Transactions" subtitle="A clean workflow from draft to broadcast.">
-                    <ul className="list">
-                        <li>Checksum address validation</li>
-                        <li>Signing confirmation modal</li>
-                        <li>Local transaction history</li>
-                    </ul>
-                    <div className="cardActions">
-                        <Link className="btn small" to="/wallet">
-                            Go to Transactions
-                        </Link>
-                    </div>
-                </Card>
-            </div>
-        </section>
+                    <p className="footerNote">
+                        © {new Date().getFullYear()} Veltaros. All rights reserved.
+                    </p>
+                </div>
+            </footer>
+        </main>
     );
 }
