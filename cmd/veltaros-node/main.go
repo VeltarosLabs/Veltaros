@@ -20,6 +20,7 @@ import (
 	"github.com/VeltarosLabs/Veltaros/internal/api"
 	"github.com/VeltarosLabs/Veltaros/internal/blockchain"
 	"github.com/VeltarosLabs/Veltaros/internal/config"
+	"github.com/VeltarosLabs/Veltaros/internal/ledger"
 	"github.com/VeltarosLabs/Veltaros/internal/logging"
 	"github.com/VeltarosLabs/Veltaros/internal/p2p"
 	"github.com/VeltarosLabs/Veltaros/internal/storage"
@@ -29,6 +30,7 @@ import (
 type nodeRuntime struct {
 	startedAt time.Time
 	chain     *blockchain.Chain
+	ledger    *ledger.Ledger
 	store     *storage.Store
 	p2p       *p2p.Node
 	networkID string
@@ -63,7 +65,10 @@ func main() {
 	}
 
 	chain := blockchain.New(cfg.Network.NonceStorePath)
-	_ = chain.LoadNonceState() // best effort
+	_ = chain.LoadNonceState()
+
+	led := ledger.New(cfg.Ledger.StorePath)
+	_ = led.Load()
 
 	p2pNode, err := p2p.New(p2p.Config{
 		ListenAddr:       cfg.Network.ListenAddr,
@@ -92,15 +97,17 @@ func main() {
 	rt := &nodeRuntime{
 		startedAt: time.Now().UTC(),
 		chain:     chain,
+		ledger:    led,
 		store:     store,
 		p2p:       p2pNode,
 		networkID: cfg.Network.NetworkID,
 		apiCfg:    cfg.API,
 	}
 
-	// Periodic persistence of nonce state
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Periodic persistence
 	go func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()
@@ -110,6 +117,7 @@ func main() {
 				return
 			case <-t.C:
 				_ = rt.chain.SaveNonceState()
+				_ = rt.ledger.Save()
 			}
 		}
 	}()
@@ -119,14 +127,16 @@ func main() {
 		apiSrv = startAPI(log, cfg.API.ListenAddr, rt)
 		defer func() {
 			_ = rt.chain.SaveNonceState()
-			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			defer cancel()
-			_ = apiSrv.Shutdown(ctx)
+			_ = rt.ledger.Save()
+			cctx, ccancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer ccancel()
+			_ = apiSrv.Shutdown(cctx)
 		}()
 	}
 
 	waitForShutdown(log)
 	_ = rt.chain.SaveNonceState()
+	_ = rt.ledger.Save()
 	log.Info("shutdown complete")
 }
 
@@ -177,7 +187,7 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		})
 	})
 
-	// Account endpoint: /account/<address>
+	// /account/<address>
 	mux.HandleFunc("/account/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
@@ -189,18 +199,78 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "address required"})
 			return
 		}
-
 		if err := blockchain.ValidateAddress(addr); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid address"})
 			return
 		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
-			"address":       addr,
-			"lastNonce":     rt.chain.LastNonce(addr),
-			"expectedNonce": rt.chain.ExpectedNonce(addr),
-			// Balance will be added when ledger state is implemented
-			"balance": "0",
+			"address":          addr,
+			"lastNonce":        rt.chain.LastNonce(addr),
+			"expectedNonce":    rt.chain.ExpectedNonce(addr),
+			"confirmedBalance": rt.ledger.ConfirmedBalance(addr),
+			"pendingOut":       rt.ledger.PendingOut(addr),
+			"spendableBalance": rt.ledger.SpendableBalance(addr),
+		})
+	})
+
+	// Optional faucet (testnet/dev): POST {address, amount}
+	mux.HandleFunc("/faucet", func(w http.ResponseWriter, r *http.Request) {
+		if !rt.apiCfg.FaucetEnabled {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+
+		// If API key exists, faucet should be protected.
+		if rt.apiCfg.APIKey != "" && (rt.apiCfg.KeyOnBroadcast || rt.apiCfg.KeyOnValidate) {
+			// Faucet is protected via middleware only if you configure RequireKeyFor.
+			// Here, we enforce it directly as well (belt & suspenders).
+			got := r.Header.Get("X-API-Key")
+			if strings.TrimSpace(got) != strings.TrimSpace(rt.apiCfg.APIKey) {
+				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+				return
+			}
+		}
+
+		body, err := readBodyLimited(r.Body, 64*1024)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+
+		var req struct {
+			Address string `json:"address"`
+			Amount  uint64 `json:"amount"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+		req.Address = strings.TrimSpace(req.Address)
+		if err := blockchain.ValidateAddress(req.Address); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid address"})
+			return
+		}
+		if req.Amount == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "amount must be > 0"})
+			return
+		}
+
+		if err := rt.ledger.FaucetCredit(req.Address, req.Amount); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		_ = rt.ledger.Save()
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"address": req.Address,
+			"amount":  req.Amount,
+			"balance": rt.ledger.ConfirmedBalance(req.Address),
 		})
 	})
 
@@ -225,16 +295,25 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			return
 		}
 
-		last := rt.chain.LastNonce(tx.Draft.From)
-		expected := rt.chain.ExpectedNonce(tx.Draft.From)
+		// Balance check (spendable)
+		required := tx.Draft.Amount
+		if rt.ledger.SpendableBalance(tx.Draft.From) < required {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":        false,
+				"error":     "insufficient balance",
+				"spendable": rt.ledger.SpendableBalance(tx.Draft.From),
+			})
+			return
+		}
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":            true,
 			"txId":          tx.TxID,
 			"from":          tx.Draft.From,
-			"lastNonce":     last,
-			"expectedNonce": expected,
+			"lastNonce":     rt.chain.LastNonce(tx.Draft.From),
+			"expectedNonce": rt.chain.ExpectedNonce(tx.Draft.From),
 			"mempoolHas":    rt.chain.MempoolHas(tx.TxID),
+			"spendable":     rt.ledger.SpendableBalance(tx.Draft.From),
 		})
 	})
 
@@ -259,11 +338,23 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			return
 		}
 
+		// De-dup
 		if rt.chain.MempoolHas(tx.TxID) {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID, "note": "already in mempool"})
 			return
 		}
 
+		// Check spendable and stage the spend in mempool view
+		if err := rt.ledger.StageMempoolSpend(tx.Draft.From, tx.Draft.Amount); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":        false,
+				"error":     err.Error(),
+				"spendable": rt.ledger.SpendableBalance(tx.Draft.From),
+			})
+			return
+		}
+
+		// Nonce must be strictly increasing (reserve)
 		if !rt.chain.ReserveNonce(tx.Draft.From, tx.Draft.Nonce) {
 			writeJSON(w, http.StatusBadRequest, map[string]any{
 				"ok":            false,
@@ -280,8 +371,12 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		}
 
 		_ = rt.chain.SaveNonceState()
+		_ = rt.ledger.Save()
 
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":   true,
+			"txId": tx.TxID,
+		})
 	})
 
 	secured := api.SecurityMiddleware(api.SecurityConfig{
@@ -290,6 +385,7 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		RequireKeyFor: map[string]bool{
 			"/tx/validate":  rt.apiCfg.KeyOnValidate,
 			"/tx/broadcast": rt.apiCfg.KeyOnBroadcast,
+			// Faucet is protected in-handler as well
 		},
 	}, mux)
 

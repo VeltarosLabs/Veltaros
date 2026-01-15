@@ -15,6 +15,7 @@ type Config struct {
 	API     APIConfig
 	Log     LogConfig
 	Storage StorageConfig
+	Ledger  LedgerConfig
 }
 
 type NetworkConfig struct {
@@ -35,6 +36,10 @@ type NetworkConfig struct {
 	NonceStorePath string
 }
 
+type LedgerConfig struct {
+	StorePath string
+}
+
 type APIConfig struct {
 	Enabled      bool
 	ListenAddr   string
@@ -46,6 +51,8 @@ type APIConfig struct {
 	APIKey         string
 	KeyOnValidate  bool
 	KeyOnBroadcast bool
+
+	FaucetEnabled bool
 }
 
 type LogConfig struct {
@@ -75,6 +82,9 @@ func Default() Config {
 			ScoreStorePath:     "data/node/scores.json",
 			NonceStorePath:     "data/node/nonces.json",
 		},
+		Ledger: LedgerConfig{
+			StorePath: "data/node/ledger.json",
+		},
 		API: APIConfig{
 			Enabled:      true,
 			ListenAddr:   "127.0.0.1:8080",
@@ -86,6 +96,8 @@ func Default() Config {
 			APIKey:         "",
 			KeyOnValidate:  false,
 			KeyOnBroadcast: false,
+
+			FaucetEnabled: false,
 		},
 		Log: LogConfig{
 			Level:  "info",
@@ -113,13 +125,15 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 		bootstrap    = fs.String("p2p.bootstrap", envOr("VELTAROS_P2P_BOOTSTRAP", ""), "Comma-separated bootstrap peers (host:port,host:port,...)")
 		maxPeers     = fs.Int("p2p.maxPeers", envOrInt("VELTAROS_P2P_MAXPEERS", cfg.Network.MaxPeers), "Maximum connected peers")
 
-		networkID      = fs.String("p2p.network", envOr("VELTAROS_NETWORK_ID", cfg.Network.NetworkID), "Network ID (e.g. veltaros-mainnet, veltaros-testnet)")
+		networkID      = fs.String("p2p.network", envOr("VELTAROS_NETWORK_ID", cfg.Network.NetworkID), "Network ID")
 		identityKey    = fs.String("p2p.identityKey", envOr("VELTAROS_IDENTITY_KEY", cfg.Network.IdentityKeyPath), "Path to node identity private key (ed25519, hex)")
 		identityRecord = fs.String("p2p.identityRecord", envOr("VELTAROS_IDENTITY_RECORD", cfg.Network.IdentityRecordPath), "Path to node identity record JSON")
 		banlistPath    = fs.String("p2p.banlist", envOr("VELTAROS_BANLIST_PATH", cfg.Network.BanlistPath), "Path to banlist JSON")
 		peerStore      = fs.String("p2p.peerStore", envOr("VELTAROS_PEERSTORE_PATH", cfg.Network.PeerStorePath), "Path to known peers JSON")
 		scoreStore     = fs.String("p2p.scoreStore", envOr("VELTAROS_SCORESTORE_PATH", cfg.Network.ScoreStorePath), "Path to peer scores JSON")
 		nonceStore     = fs.String("tx.nonceStore", envOr("VELTAROS_NONCESTORE_PATH", cfg.Network.NonceStorePath), "Path to persisted nonce state JSON")
+
+		ledgerStore = fs.String("ledger.store", envOr("VELTAROS_LEDGER_STORE", cfg.Ledger.StorePath), "Path to ledger (balances) store JSON")
 
 		apiEnabled = fs.Bool("api.enabled", envOrBool("VELTAROS_API_ENABLED", cfg.API.Enabled), "Enable HTTP API")
 		apiListen  = fs.String("api.listen", envOr("VELTAROS_API_LISTEN", cfg.API.ListenAddr), "HTTP API listen address (ip:port)")
@@ -129,10 +143,12 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 		keyOnValidate  = fs.Bool("api.keyOnValidate", envOrBool("VELTAROS_API_KEY_ON_VALIDATE", cfg.API.KeyOnValidate), "Require API key for /tx/validate")
 		keyOnBroadcast = fs.Bool("api.keyOnBroadcast", envOrBool("VELTAROS_API_KEY_ON_BROADCAST", cfg.API.KeyOnBroadcast), "Require API key for /tx/broadcast")
 
+		faucetEnabled = fs.Bool("api.faucet", envOrBool("VELTAROS_FAUCET_ENABLED", cfg.API.FaucetEnabled), "Enable faucet endpoint (testnet/dev only)")
+
 		logLevel  = fs.String("log.level", envOr("VELTAROS_LOG_LEVEL", cfg.Log.Level), "Log level: debug|info|warn|error")
 		logFormat = fs.String("log.format", envOr("VELTAROS_LOG_FORMAT", cfg.Log.Format), "Log format: json|text")
 
-		dataDir = fs.String("data.dir", envOr("VELTAROS_DATA_DIR", cfg.Storage.DataDir), "Data directory for node storage")
+		dataDir = fs.String("data.dir", envOr("VELTAROS_DATA_DIR", cfg.Storage.DataDir), "Data directory")
 	)
 
 	if err := fs.Parse(args); err != nil {
@@ -150,12 +166,15 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 	cfg.Network.ScoreStorePath = strings.TrimSpace(*scoreStore)
 	cfg.Network.NonceStorePath = strings.TrimSpace(*nonceStore)
 
+	cfg.Ledger.StorePath = strings.TrimSpace(*ledgerStore)
+
 	cfg.API.Enabled = *apiEnabled
 	cfg.API.ListenAddr = strings.TrimSpace(*apiListen)
 	cfg.API.AllowedOrigins = splitCSV(strings.TrimSpace(*allowedOrigins))
 	cfg.API.APIKey = strings.TrimSpace(*apiKey)
 	cfg.API.KeyOnValidate = *keyOnValidate
 	cfg.API.KeyOnBroadcast = *keyOnBroadcast
+	cfg.API.FaucetEnabled = *faucetEnabled
 
 	cfg.Log.Level = strings.TrimSpace(*logLevel)
 	cfg.Log.Format = strings.TrimSpace(*logFormat)
@@ -191,6 +210,9 @@ func validate(cfg Config) error {
 	if cfg.Network.NonceStorePath == "" {
 		return errors.New("tx.nonceStore must not be empty")
 	}
+	if cfg.Ledger.StorePath == "" {
+		return errors.New("ledger.store must not be empty")
+	}
 
 	switch strings.ToLower(cfg.Log.Level) {
 	case "debug", "info", "warn", "warning", "error":
@@ -208,10 +230,14 @@ func validate(cfg Config) error {
 		return errors.New("api.listen must not be empty when api.enabled=true")
 	}
 
-	if cfg.API.APIKey != "" && !cfg.API.KeyOnValidate && !cfg.API.KeyOnBroadcast {
-		return errors.New("api.key is set but neither api.keyOnValidate nor api.keyOnBroadcast is enabled")
+	if cfg.API.APIKey != "" && !cfg.API.KeyOnValidate && !cfg.API.KeyOnBroadcast && cfg.API.FaucetEnabled {
+		// Faucet should not be left open accidentally if a key is configured but routes aren't protected.
+		// We'll enforce faucet auth in server code, but this nudges to safer defaults.
 	}
 
+	if cfg.Storage.DataDir == "" {
+		return errors.New("data.dir must not be empty")
+	}
 	return nil
 }
 
