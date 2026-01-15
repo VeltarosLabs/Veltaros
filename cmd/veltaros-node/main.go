@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -61,7 +62,8 @@ func main() {
 		os.Exit(exitWithError(err))
 	}
 
-	chain := blockchain.New()
+	chain := blockchain.New(cfg.Network.NonceStorePath)
+	_ = chain.LoadNonceState() // best effort
 
 	p2pNode, err := p2p.New(p2p.Config{
 		ListenAddr:       cfg.Network.ListenAddr,
@@ -96,10 +98,27 @@ func main() {
 		apiCfg:    cfg.API,
 	}
 
+	// Periodic persistence of nonce state
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				_ = rt.chain.SaveNonceState()
+			}
+		}
+	}()
+
 	var apiSrv *http.Server
 	if cfg.API.Enabled {
 		apiSrv = startAPI(log, cfg.API.ListenAddr, rt)
 		defer func() {
+			_ = rt.chain.SaveNonceState()
 			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer cancel()
 			_ = apiSrv.Shutdown(ctx)
@@ -107,6 +126,7 @@ func main() {
 	}
 
 	waitForShutdown(log)
+	_ = rt.chain.SaveNonceState()
 	log.Info("shutdown complete")
 }
 
@@ -154,6 +174,33 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"count": rt.chain.MempoolCount(),
 			"txs":   rt.chain.MempoolList(),
+		})
+	})
+
+	// Account endpoint: /account/<address>
+	mux.HandleFunc("/account/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		addr := strings.TrimPrefix(r.URL.Path, "/account/")
+		addr = strings.TrimSpace(addr)
+		if addr == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "address required"})
+			return
+		}
+
+		if err := blockchain.ValidateAddress(addr); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid address"})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"address":       addr,
+			"lastNonce":     rt.chain.LastNonce(addr),
+			"expectedNonce": rt.chain.ExpectedNonce(addr),
+			// Balance will be added when ledger state is implemented
+			"balance": "0",
 		})
 	})
 
@@ -231,6 +278,8 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
+
+		_ = rt.chain.SaveNonceState()
 
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
 	})

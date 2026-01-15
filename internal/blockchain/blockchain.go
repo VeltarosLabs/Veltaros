@@ -12,17 +12,20 @@ type Chain struct {
 	mu      sync.RWMutex
 	mempool map[string]SignedTx // txId -> tx
 
-	nonces *NonceTracker
+	nonces     *NonceTracker
+	nonceStore *NonceStore
 }
 
-func New() *Chain {
+func New(nonceStorePath string) *Chain {
 	g := NewGenesisBlock()
-	return &Chain{
-		genesis: g,
-		height:  0,
-		mempool: make(map[string]SignedTx),
-		nonces:  NewNonceTracker(),
+	c := &Chain{
+		genesis:    g,
+		height:     0,
+		mempool:    make(map[string]SignedTx),
+		nonces:     NewNonceTracker(),
+		nonceStore: NewNonceStore(nonceStorePath),
 	}
+	return c
 }
 
 func (c *Chain) Height() uint64 { return c.height }
@@ -30,8 +33,6 @@ func (c *Chain) Height() uint64 { return c.height }
 func (c *Chain) Genesis() Block { return c.genesis }
 
 func (c *Chain) AddBlock(_ Block) error {
-	// Placeholder for now; real validation + storage comes next.
-	// When blocks are implemented, this is where nonce tracking should move to chain-state.
 	c.height++
 	return nil
 }
@@ -40,11 +41,9 @@ func (c *Chain) MempoolAdd(tx SignedTx) error {
 	if err := ValidateSignedTx(tx); err != nil {
 		return err
 	}
-
 	c.mu.Lock()
 	c.mempool[tx.TxID] = tx
 	c.mu.Unlock()
-
 	return nil
 }
 
@@ -80,10 +79,29 @@ func (c *Chain) ExpectedNonce(addr string) uint64 {
 	return c.nonces.ExpectedNext(addr)
 }
 
-// ReserveNonce enforces strictly increasing nonces for broadcast.
-// If nonce is valid, it reserves/updates the last nonce and returns true.
 func (c *Chain) ReserveNonce(addr string, nonce uint64) bool {
 	return c.nonces.CheckAndUpdate(addr, nonce)
+}
+
+// LoadNonceState restores last nonces from disk.
+func (c *Chain) LoadNonceState() error {
+	if c.nonceStore == nil {
+		return nil
+	}
+	snaps, err := c.nonceStore.Load()
+	if err != nil {
+		return err
+	}
+	c.nonces.ApplySnapshot(snaps)
+	return nil
+}
+
+// SaveNonceState persists last nonces to disk.
+func (c *Chain) SaveNonceState() error {
+	if c.nonceStore == nil {
+		return nil
+	}
+	return c.nonceStore.Save(c.nonces.Snapshot())
 }
 
 var ErrInvalidBlock = errors.New("invalid block")

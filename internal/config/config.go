@@ -31,6 +31,8 @@ type NetworkConfig struct {
 	BanlistPath        string
 	PeerStorePath      string
 	ScoreStorePath     string
+
+	NonceStorePath string
 }
 
 type APIConfig struct {
@@ -71,6 +73,7 @@ func Default() Config {
 			BanlistPath:        "data/node/banlist.json",
 			PeerStorePath:      "data/node/peers.json",
 			ScoreStorePath:     "data/node/scores.json",
+			NonceStorePath:     "data/node/nonces.json",
 		},
 		API: APIConfig{
 			Enabled:      true,
@@ -112,10 +115,11 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 
 		networkID      = fs.String("p2p.network", envOr("VELTAROS_NETWORK_ID", cfg.Network.NetworkID), "Network ID (e.g. veltaros-mainnet, veltaros-testnet)")
 		identityKey    = fs.String("p2p.identityKey", envOr("VELTAROS_IDENTITY_KEY", cfg.Network.IdentityKeyPath), "Path to node identity private key (ed25519, hex)")
-		identityRecord = fs.String("p2p.identityRecord", envOr("VELTAROS_IDENTITY_RECORD", cfg.Network.IdentityRecordPath), "Path to node identity record JSON (public metadata)")
-		banlistPath    = fs.String("p2p.banlist", envOr("VELTAROS_BANLIST_PATH", cfg.Network.BanlistPath), "Path to banlist JSON file")
-		peerStore      = fs.String("p2p.peerStore", envOr("VELTAROS_PEERSTORE_PATH", cfg.Network.PeerStorePath), "Path to known peers JSON file")
-		scoreStore     = fs.String("p2p.scoreStore", envOr("VELTAROS_SCORESTORE_PATH", cfg.Network.ScoreStorePath), "Path to peer score store JSON file")
+		identityRecord = fs.String("p2p.identityRecord", envOr("VELTAROS_IDENTITY_RECORD", cfg.Network.IdentityRecordPath), "Path to node identity record JSON")
+		banlistPath    = fs.String("p2p.banlist", envOr("VELTAROS_BANLIST_PATH", cfg.Network.BanlistPath), "Path to banlist JSON")
+		peerStore      = fs.String("p2p.peerStore", envOr("VELTAROS_PEERSTORE_PATH", cfg.Network.PeerStorePath), "Path to known peers JSON")
+		scoreStore     = fs.String("p2p.scoreStore", envOr("VELTAROS_SCORESTORE_PATH", cfg.Network.ScoreStorePath), "Path to peer scores JSON")
+		nonceStore     = fs.String("tx.nonceStore", envOr("VELTAROS_NONCESTORE_PATH", cfg.Network.NonceStorePath), "Path to persisted nonce state JSON")
 
 		apiEnabled = fs.Bool("api.enabled", envOrBool("VELTAROS_API_ENABLED", cfg.API.Enabled), "Enable HTTP API")
 		apiListen  = fs.String("api.listen", envOr("VELTAROS_API_LISTEN", cfg.API.ListenAddr), "HTTP API listen address (ip:port)")
@@ -144,6 +148,7 @@ func ParseNodeFlags(args []string) (Parsed, error) {
 	cfg.Network.BanlistPath = strings.TrimSpace(*banlistPath)
 	cfg.Network.PeerStorePath = strings.TrimSpace(*peerStore)
 	cfg.Network.ScoreStorePath = strings.TrimSpace(*scoreStore)
+	cfg.Network.NonceStorePath = strings.TrimSpace(*nonceStore)
 
 	cfg.API.Enabled = *apiEnabled
 	cfg.API.ListenAddr = strings.TrimSpace(*apiListen)
@@ -177,20 +182,14 @@ func validate(cfg Config) error {
 	if cfg.Network.NetworkID == "" {
 		return errors.New("p2p.network must not be empty")
 	}
-	if cfg.Network.IdentityKeyPath == "" {
-		return errors.New("p2p.identityKey must not be empty")
+	if cfg.Network.IdentityKeyPath == "" || cfg.Network.IdentityRecordPath == "" {
+		return errors.New("identity key/record paths must not be empty")
 	}
-	if cfg.Network.IdentityRecordPath == "" {
-		return errors.New("p2p.identityRecord must not be empty")
+	if cfg.Network.BanlistPath == "" || cfg.Network.PeerStorePath == "" || cfg.Network.ScoreStorePath == "" {
+		return errors.New("p2p store paths must not be empty")
 	}
-	if cfg.Network.BanlistPath == "" {
-		return errors.New("p2p.banlist must not be empty")
-	}
-	if cfg.Network.PeerStorePath == "" {
-		return errors.New("p2p.peerStore must not be empty")
-	}
-	if cfg.Network.ScoreStorePath == "" {
-		return errors.New("p2p.scoreStore must not be empty")
+	if cfg.Network.NonceStorePath == "" {
+		return errors.New("tx.nonceStore must not be empty")
 	}
 
 	switch strings.ToLower(cfg.Log.Level) {
@@ -209,7 +208,6 @@ func validate(cfg Config) error {
 		return errors.New("api.listen must not be empty when api.enabled=true")
 	}
 
-	// If key is set, at least one key-protected path should be enabled (or it's pointless).
 	if cfg.API.APIKey != "" && !cfg.API.KeyOnValidate && !cfg.API.KeyOnBroadcast {
 		return errors.New("api.key is set but neither api.keyOnValidate nor api.keyOnBroadcast is enabled")
 	}
