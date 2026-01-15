@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { env } from "../config/env";
-import { VeltarosApiClient } from "../api/client";
+import { VeltarosApiClient, type TxBroadcastResponse, type TxValidateResponse } from "../api/client";
 import type { NodeStatus, PeerList } from "../api/types";
 import type { MempoolResponse } from "../api/mempoolTypes";
 import { usePoll } from "../hooks/usePoll";
@@ -37,6 +37,12 @@ function tsToIso(ts: number): string {
 
 async function copyToClipboard(text: string): Promise<void> {
     await navigator.clipboard.writeText(text);
+}
+
+function asNumberString(n: number | undefined): string | null {
+    if (typeof n !== "number") return null;
+    if (!Number.isFinite(n)) return null;
+    return String(Math.max(0, Math.floor(n)));
 }
 
 export default function Wallet(): React.ReactElement {
@@ -190,6 +196,33 @@ export default function Wallet(): React.ReactElement {
             return;
         }
 
+        // Optional: ask node for expected nonce based on current state
+        try {
+            const v: TxValidateResponse = await api.txValidate({
+                draft: {
+                    version: 1,
+                    networkId: status.data.networkID,
+                    from: wallet.address,
+                    to,
+                    amount,
+                    fee,
+                    nonce,
+                    timestamp: Math.floor(Date.now() / 1000),
+                    memo: txMemo.trim() ? txMemo.trim() : undefined
+                },
+                publicKeyHex: wallet.publicKeyRawHex,
+                signatureHex: "00".repeat(64), // placeholder, server will fail signature but will still return nonce data only if ok; so ignore here
+                txId: "00".repeat(32)
+            } as unknown as SignedTx);
+
+            if ("ok" in v && v.ok && typeof v.expectedNonce === "number") {
+                const suggested = asNumberString(v.expectedNonce);
+                if (suggested) setTxNonce(suggested);
+            }
+        } catch {
+            // ignore; we only use this as a convenience
+        }
+
         setSignPwd("");
         setSignOpen(true);
     };
@@ -231,15 +264,25 @@ export default function Wallet(): React.ReactElement {
             upsertHistory(base);
             refreshHistory();
 
-            const res = await api.txValidate(stx);
+            const res: TxValidateResponse = await api.txValidate(stx);
             setTxResult(JSON.stringify(res, null, 2));
 
-            upsertHistory({ ...base, status: "validated", note: "Validated by node" });
-            refreshHistory();
+            if ("ok" in res && res.ok) {
+                upsertHistory({ ...base, status: "validated", note: `Validated. Expected nonce: ${res.expectedNonce}` });
+                refreshHistory();
 
-            setSignOpen(false);
-            setSignPwd("");
-            show("Signed and validated");
+                const suggested = asNumberString(res.expectedNonce);
+                if (suggested) setTxNonce(suggested);
+
+                setSignOpen(false);
+                setSignPwd("");
+                show("Signed and validated");
+                return;
+            }
+
+            upsertHistory({ ...base, status: "error", note: res.error });
+            refreshHistory();
+            setNotice(res.error);
         } catch (e) {
             fail(e);
         } finally {
@@ -253,19 +296,35 @@ export default function Wallet(): React.ReactElement {
 
         try {
             if (!signed) throw new Error("No signed transaction yet");
-            const res = await api.txBroadcast(signed);
+
+            const res: TxBroadcastResponse = await api.txBroadcast(signed);
             setTxResult(JSON.stringify(res, null, 2));
 
-            upsertHistory({
-                id: signed.txId,
-                createdAt: new Date().toISOString(),
-                status: "broadcast",
-                note: "Accepted by node mempool",
-                tx: signed
-            });
-            refreshHistory();
+            if ("ok" in res && res.ok) {
+                upsertHistory({
+                    id: signed.txId,
+                    createdAt: new Date().toISOString(),
+                    status: "broadcast",
+                    note: res.note ? res.note : "Accepted by node mempool",
+                    tx: signed
+                });
+                refreshHistory();
+                show(res.note ? res.note : "Broadcast accepted");
+                return;
+            }
 
-            show("Broadcast accepted");
+            // If nonce guidance is present, help the user
+            if (typeof res.expectedNonce === "number") {
+                const suggested = asNumberString(res.expectedNonce);
+                if (suggested) {
+                    setTxNonce(suggested);
+                    setNotice(`${res.error}. Suggested nonce: ${suggested}`);
+                } else {
+                    setNotice(res.error);
+                }
+            } else {
+                setNotice(res.error);
+            }
         } catch (e) {
             fail(e);
         } finally {

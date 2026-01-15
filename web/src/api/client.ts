@@ -1,7 +1,40 @@
 import type { Health, NodeStatus, PeerList, VersionInfo } from "./types";
 import type { MempoolResponse } from "./mempoolTypes";
+import type { SignedTx } from "../tx/types";
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
+
+export type TxValidateOk = {
+    ok: true;
+    txId: string;
+    from: string;
+    lastNonce: number;
+    expectedNonce: number;
+    mempoolHas: boolean;
+};
+
+export type TxValidateErr = {
+    ok: false;
+    error: string;
+    lastNonce?: number;
+    expectedNonce?: number;
+};
+
+export type TxBroadcastOk = {
+    ok: true;
+    txId: string;
+    note?: string;
+};
+
+export type TxBroadcastErr = {
+    ok: false;
+    error: string;
+    lastNonce?: number;
+    expectedNonce?: number;
+};
+
+export type TxValidateResponse = TxValidateOk | TxValidateErr;
+export type TxBroadcastResponse = TxBroadcastOk | TxBroadcastErr;
 
 export class VeltarosApiError extends Error {
     public readonly status: number;
@@ -42,12 +75,12 @@ export class VeltarosApiClient {
         return this.getJson<MempoolResponse>("/mempool", signal);
     }
 
-    async txValidate(body: unknown, signal?: AbortSignal): Promise<unknown> {
-        return this.postJson<unknown>("/tx/validate", body, signal);
+    async txValidate(tx: SignedTx, signal?: AbortSignal): Promise<TxValidateResponse> {
+        return this.postJson<TxValidateResponse>("/tx/validate", tx, signal);
     }
 
-    async txBroadcast(body: unknown, signal?: AbortSignal): Promise<unknown> {
-        return this.postJson<unknown>("/tx/broadcast", body, signal);
+    async txBroadcast(tx: SignedTx, signal?: AbortSignal): Promise<TxBroadcastResponse> {
+        return this.postJson<TxBroadcastResponse>("/tx/broadcast", tx, signal);
     }
 
     private async getJson<T extends Json>(path: string, signal?: AbortSignal): Promise<T> {
@@ -75,12 +108,27 @@ export class VeltarosApiClient {
             signal
         });
 
+        // Even on errors, node returns JSON with a message. Try to parse it first.
+        const text = await res.text();
+        const json = safeParseJson(text);
+
         if (!res.ok) {
-            const text = await safeReadText(res);
-            throw new VeltarosApiError(`HTTP ${res.status} for ${path}${text ? `: ${text}` : ""}`, res.status, url);
+            if (json) return json as T;
+            throw new VeltarosApiError(`HTTP ${res.status} for ${path}${text ? `: ${text.slice(0, 200)}` : ""}`, res.status, url);
         }
 
-        return (await res.json()) as T;
+        if (json) return json as T;
+        return {} as T;
+    }
+}
+
+function safeParseJson(text: string): unknown | null {
+    const t = text.trim();
+    if (!t) return null;
+    try {
+        return JSON.parse(t);
+    } catch {
+        return null;
     }
 }
 
