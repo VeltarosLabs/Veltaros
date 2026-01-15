@@ -1,0 +1,17 @@
+
+.git
+.gitignore
+.vscode
+.idea
+
+web/node_modules
+web/dist
+web/.vercel
+
+data
+tmp
+logs
+
+*.log
+*.exe
+*.out

@@ -14,14 +14,14 @@ Veltaros is built with a production mindset: clean boundaries, strict validation
 
 - `cmd/`
   - `veltaros-node/` — Node entry point (HTTP API, P2P, mempool, validation)
-  - `veltaros-cli/` — CLI tooling (wallet utilities, signing helpers)
+  - `veltaros-cli/` — CLI tooling
 - `internal/`
-  - `blockchain/` — Blocks, transactions, address rules, mempool + nonce policy (early-stage)
-  - `p2p/` — Peer lifecycle, handshake, scoring, peer discovery, banlist, persistence
+  - `blockchain/` — Address rules, signed transactions, mempool, nonce policy (current phase)
+  - `p2p/` — Peer lifecycle, handshake, scoring, discovery, banlist + persistence
   - `config/` — Node configuration + flags
   - `logging/` — Structured logging
   - `storage/` — Storage helpers (expanded in later phases)
-  - `api/` — API utilities (rate limiting)
+  - `api/` — Server utilities (rate limiting)
 - `pkg/`
   - `api/` — Go HTTP API client for node endpoints
   - `types/` — Shared public types (reserved)
@@ -34,7 +34,7 @@ Veltaros is built with a production mindset: clean boundaries, strict validation
 ## Current Features
 
 ### Node (Go)
-- P2P listener with:
+- P2P:
   - identity-based HELLO handshake
   - challenge-response verification
   - peer discovery (GET_PEERS / PEERS)
@@ -53,27 +53,27 @@ Veltaros is built with a production mindset: clean boundaries, strict validation
 
 ### Web (React)
 - Landing page:
-  - light/dark mode toggle
-  - responsive hero wallpaper + clear sections
+  - light/dark theme toggle
+  - responsive hero + clean sections
 - Wallet UI:
-  - encrypted local wallet vault (PBKDF2 + AES-GCM)
+  - encrypted local vault (PBKDF2 + AES-GCM)
   - receive address with copy
   - transaction drafting + signing modal
-  - local transaction history
+  - local tx history
   - node status + peers + mempool views
-  - responsive layout for mobile/tablet/desktop
+  - responsive layout (mobile/tablet/desktop)
 
 ---
 
-## Getting Started
+## Run Locally
 
 ### Requirements
-- Go (installed)
-- Node.js + npm (installed)
+- Go
+- Node.js + npm
 - Git
 
-### Run the Node
-From the repository root:
+### Node
+From repository root:
 
 ```bash
 go mod tidy

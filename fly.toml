@@ -1,0 +1,45 @@
+app = "veltaros-node"
+primary_region = "lhr"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  VELTAROS_API_ENABLED = "true"
+  VELTAROS_API_LISTEN = "0.0.0.0:8080"
+  VELTAROS_P2P_LISTEN = "0.0.0.0:30303"
+  VELTAROS_NETWORK_ID = "veltaros-mainnet"
+  VELTAROS_DATA_DIR = "/data"
+  VELTAROS_IDENTITY_KEY = "/data/node/identity.key"
+  VELTAROS_IDENTITY_RECORD = "/data/node/identity.json"
+  VELTAROS_BANLIST_PATH = "/data/node/banlist.json"
+  VELTAROS_PEERSTORE_PATH = "/data/node/peers.json"
+  VELTAROS_SCORESTORE_PATH = "/data/node/scores.json"
+
+[mounts]
+  source = "veltaros_data"
+  destination = "/data"
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 1000
+    soft_limit = 200
+
+[[services]]
+  internal_port = 30303
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 30303
