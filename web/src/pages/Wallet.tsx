@@ -46,7 +46,7 @@ function asNumberString(n: number | undefined): string | null {
 }
 
 export default function Wallet(): React.ReactElement {
-    const api = useMemo(() => new VeltarosApiClient(env.nodeApiBaseUrl), []);
+    const api = useMemo(() => new VeltarosApiClient(env.nodeApiBaseUrl, env.apiKey), []);
     const status = usePoll<NodeStatus>((signal) => api.status(signal), 2500);
     const peers = usePoll<PeerList>((signal) => api.peers(signal), 3000);
     const mempool = usePoll<MempoolResponse>((signal) => api.mempool(signal), 3500);

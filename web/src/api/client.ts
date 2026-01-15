@@ -50,9 +50,11 @@ export class VeltarosApiError extends Error {
 
 export class VeltarosApiClient {
     private readonly baseUrl: string;
+    private readonly apiKey: string;
 
-    constructor(baseUrl: string) {
+    constructor(baseUrl: string, apiKey?: string) {
         this.baseUrl = baseUrl.replace(/\/+$/, "");
+        this.apiKey = (apiKey ?? "").trim();
     }
 
     async health(signal?: AbortSignal): Promise<Health> {
@@ -76,11 +78,11 @@ export class VeltarosApiClient {
     }
 
     async txValidate(tx: SignedTx, signal?: AbortSignal): Promise<TxValidateResponse> {
-        return this.postJson<TxValidateResponse>("/tx/validate", tx, signal);
+        return this.postJson<TxValidateResponse>("/tx/validate", tx, signal, true);
     }
 
     async txBroadcast(tx: SignedTx, signal?: AbortSignal): Promise<TxBroadcastResponse> {
-        return this.postJson<TxBroadcastResponse>("/tx/broadcast", tx, signal);
+        return this.postJson<TxBroadcastResponse>("/tx/broadcast", tx, signal, true);
     }
 
     private async getJson<T extends Json>(path: string, signal?: AbortSignal): Promise<T> {
@@ -99,20 +101,35 @@ export class VeltarosApiClient {
         return (await res.json()) as T;
     }
 
-    private async postJson<T extends Json>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    private async postJson<T extends Json>(
+        path: string,
+        body: unknown,
+        signal?: AbortSignal,
+        includeApiKey?: boolean
+    ): Promise<T> {
         const url = `${this.baseUrl}${path}`;
+
+        const headers: Record<string, string> = {
+            Accept: "application/json",
+            "Content-Type": "application/json"
+        };
+
+        if (includeApiKey && this.apiKey) {
+            headers["X-API-Key"] = this.apiKey;
+        }
+
         const res = await fetch(url, {
             method: "POST",
-            headers: { Accept: "application/json", "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify(body),
             signal
         });
 
-        // Even on errors, node returns JSON with a message. Try to parse it first.
         const text = await res.text();
         const json = safeParseJson(text);
 
         if (!res.ok) {
+            // if server gave JSON (like {"ok":false,"error":"unauthorized"}), return it so UI can show message
             if (json) return json as T;
             throw new VeltarosApiError(`HTTP ${res.status} for ${path}${text ? `: ${text.slice(0, 200)}` : ""}`, res.status, url);
         }
