@@ -1,430 +1,220 @@
-/* -----------------------------
-   Theme tokens
------------------------------- */
-:root {
-    --radius: 18px;
-    --radius2: 14px;
-    --shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-
-    --bg: #f8fafc;
-    --bg2: #eef2f7;
-    --panel: rgba(255, 255, 255, 0.92);
-    --panel2: rgba(255, 255, 255, 0.78);
-
-    --text: #0f172a;
-    --muted: #475569;
-
-    --border: rgba(15, 23, 42, 0.10);
-    --border2: rgba(15, 23, 42, 0.06);
-
-    --btn: rgba(15, 23, 42, 0.06);
-    --btnHover: rgba(15, 23, 42, 0.10);
-
-    --danger: #e11d48;
-}
-
-:root[data-theme="dark"] {
-    --bg: #0b0f19;
-    --bg2: #0f1523;
-    --panel: rgba(17, 24, 39, 0.92);
-    --panel2: rgba(17, 24, 39, 0.72);
-
-    --text: #e5e7eb;
-    --muted: #9ca3af;
-
-    --border: rgba(255, 255, 255, 0.10);
-    --border2: rgba(255, 255, 255, 0.06);
-
-    --btn: rgba(255, 255, 255, 0.08);
-    --btnHover: rgba(255, 255, 255, 0.12);
-
-    --danger: #fb7185;
-}
-
-/* -----------------------------
-   Base
------------------------------- */
-* {
-    box-sizing: border-box;
-}
-
-html,
-body {
-    margin: 0;
-    padding: 0;
-    color: var(--text);
-    background:
-        radial-gradient(1200px 700px at 20% -10%, rgba(147, 197, 253, 0.18), transparent 60%),
-        radial-gradient(1000px 600px at 110% 0%, rgba(236, 72, 153, 0.12), transparent 55%),
-        linear-gradient(180deg, var(--bg), var(--bg2));
-    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-    line-height: 1.5;
-}
-
-a {
-    color: inherit;
-    text-decoration: none;
-}
-
-.muted {
-    color: var(--muted);
-}
-
-.mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-}
-
-.container {
-    width: min(1120px, calc(100% - 2rem));
-    margin: 0 auto;
-}
-
-.main {
-    padding: 1.25rem 0 2.5rem;
-}
-
-/* Shared button styles (used across app) */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.72rem 1rem;
-    border-radius: 14px;
-    border: 1px solid var(--border2);
-    background: var(--btn);
-    color: var(--text);
-    cursor: pointer;
-    transition: background 160ms ease;
-}
-
-.btn:hover {
-    background: var(--btnHover);
-}
-
-.btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-.btn.primary {
-    background: color-mix(in srgb, var(--btnHover) 60%, transparent);
-}
-
-.btn.small {
-    padding: 0.48rem 0.7rem;
-    border-radius: 12px;
-    font-size: 0.92rem;
-}
-
-.btn.danger {
-    background: color-mix(in srgb, var(--danger) 14%, transparent);
-    border-color: color-mix(in srgb, var(--danger) 26%, transparent);
-}
-
-/* Code chip */
-.code {
-    padding: 0.15rem 0.4rem;
-    border-radius: 12px;
-    border: 1px solid var(--border2);
-    background: rgba(255, 255, 255, 0.10);
-}
-
-/* -----------------------------
-   Navbar
------------------------------- */
-.nav {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-    border-bottom: 1px solid var(--border2);
-    background: color-mix(in srgb, var(--bg) 60%, transparent);
-    backdrop-filter: blur(12px);
-}
-
-.navInner {
-    width: min(1120px, calc(100% - 2rem));
-    margin: 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding: 0.85rem 0;
-    position: relative;
-}
-
-.brand {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    min-width: 0;
-}
-
-.brandLogo {
-    width: 28px;
-    height: 28px;
-    border-radius: 10px;
-    object-fit: cover;
-    border: 1px solid var(--border2);
-}
-
-.brandText {
-    font-weight: 760;
-    letter-spacing: 0.2px;
-}
-
-.navRight {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-}
-
-.navLinks {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-}
-
-.navLinks a {
-    padding: 0.45rem 0.7rem;
-    border-radius: 12px;
-    color: var(--muted);
-    border: 1px solid transparent;
-    transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
-}
-
-.navLinks a.active {
-    color: var(--text);
-    background: var(--btn);
-    border-color: var(--border2);
-}
-
-.navLinks a:hover {
-    color: var(--text);
-    background: var(--btnHover);
-}
-
-.navToggle {
-    display: none;
-    border: 1px solid var(--border2);
-    background: var(--btn);
-    border-radius: 14px;
-    padding: 0.55rem 0.7rem;
-    cursor: pointer;
-}
-
-.bars {
+/* =========================
+   Landing Layout
+========================= */
+.landing {
     display: block;
-    width: 18px;
-    height: 2px;
-    background: var(--text);
+}
+
+/* =========================
+   Hero
+========================= */
+.hero {
     position: relative;
-    border-radius: 2px;
+    min-height: clamp(540px, 76vh, 860px);
+    display: grid;
+    place-items: center;
+    padding: 4.8rem 1rem 3.8rem;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--border2);
+    box-shadow: var(--shadow);
 }
 
-.bars::before,
-.bars::after {
-    content: "";
+.heroOverlay {
     position: absolute;
-    left: 0;
-    width: 18px;
-    height: 2px;
-    background: var(--text);
-    border-radius: 2px;
-    transition: transform 160ms ease, top 160ms ease, opacity 160ms ease;
+    inset: 0;
+    /* Dark theme overlay */
+    background:
+        radial-gradient(900px 540px at 50% 25%, rgba(0, 0, 0, 0.38), transparent 60%),
+        linear-gradient(180deg, rgba(0, 0, 0, 0.62) 0%, rgba(0, 0, 0, 0.70) 50%, rgba(0, 0, 0, 0.78) 100%);
 }
 
-.bars::before {
-    top: -6px;
+:root[data-theme="light"] .heroOverlay {
+    /* Light theme overlay (strong enough for bright images) */
+    background:
+        radial-gradient(900px 540px at 50% 25%, rgba(255, 255, 255, 0.55), transparent 62%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.70) 0%, rgba(255, 255, 255, 0.80) 50%, rgba(255, 255, 255, 0.88) 100%);
 }
 
-.bars::after {
-    top: 6px;
+.heroContent {
+    position: relative;
+    z-index: 2;
+    width: min(860px, 100%);
+    text-align: center;
+    padding: 1.25rem 1.25rem 1.5rem;
 }
 
-.bars.open {
-    background: transparent;
-}
-
-.bars.open::before {
-    top: 0;
-    transform: rotate(45deg);
-}
-
-.bars.open::after {
-    top: 0;
-    transform: rotate(-45deg);
-}
-
-/* Theme toggle button */
-.iconBtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.55rem 0.75rem;
-    border-radius: 14px;
-    border: 1px solid var(--border2);
-    background: var(--btn);
-    color: var(--text);
-    cursor: pointer;
-    transition: background 160ms ease;
-}
-
-.iconBtn:hover {
-    background: var(--btnHover);
-}
-
-.iconBtnLabel {
-    font-size: 0.92rem;
-    color: var(--muted);
-}
-
-/* -----------------------------
-   Footer (Global)
------------------------------- */
-.siteFooter {
-    border-top: 1px solid var(--border2);
-    background: color-mix(in srgb, var(--bg) 70%, transparent);
-    backdrop-filter: blur(10px);
-    padding: 1.35rem 0;
-}
-
-.footerWrap {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 1.25rem;
-    align-items: center;
-}
-
-.footerLeft {
-    min-width: 0;
-}
-
-.footerBrand {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.footerLogo {
-    width: 40px;
-    height: 40px;
-    border-radius: 14px;
+.heroLogo {
+    width: 76px;
+    height: 76px;
+    border-radius: 18px;
     object-fit: cover;
+    margin: 0 auto 1rem;
     border: 1px solid var(--border2);
-    background: rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.06);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
 }
 
-.footerBrandText {
-    min-width: 0;
+:root[data-theme="light"] .heroLogo {
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
 }
 
-.footerTitle {
-    font-weight: 800;
-    letter-spacing: 0.2px;
+.heroTitle {
+    margin: 0;
+    font-size: clamp(2.3rem, 5vw, 3.7rem);
+    letter-spacing: -0.7px;
+    line-height: 1.08;
 }
 
-.footerSubtitle {
-    color: var(--muted);
-    font-size: 0.95rem;
-    margin-top: 0.15rem;
+.heroSubtitle {
+    margin: 0.95rem auto 1.35rem;
+    max-width: 64ch;
+    color: color-mix(in srgb, var(--text) 80%, var(--muted));
+    font-size: 1.05rem;
 }
 
-.footerMeta {
-    margin-top: 0.75rem;
-    color: var(--muted);
-    font-size: 0.92rem;
+.heroActions {
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    justify-content: center;
+    gap: 0.75rem;
     flex-wrap: wrap;
 }
 
-.dot {
-    opacity: 0.8;
+.btn.ghost {
+    background: transparent;
+    border: 1px solid var(--border2);
 }
 
-.footerRight {
+/* =========================
+   Sections
+========================= */
+.section {
+    margin-top: 1.9rem;
+    padding: 1.4rem 0;
+}
+
+.section.alt {
+    padding: 1.6rem 0;
+}
+
+.sectionHeader {
+    width: min(980px, 100%);
+    margin: 0 auto 1rem;
+    text-align: left;
+}
+
+.sectionHeader h2 {
+    margin: 0 0 0.4rem;
+    font-size: 1.6rem;
+    letter-spacing: -0.25px;
+}
+
+.sectionHeader p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1.65;
+}
+
+/* =========================
+   Cards
+========================= */
+.cardGrid {
     display: grid;
-    gap: 0.6rem;
-    justify-items: end;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
 }
 
-.footerSectionTitle {
-    font-weight: 650;
-    color: var(--text);
-}
-
-/* Social links (from SocialLinks.tsx) */
-.socialRow {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-}
-
-.socialLink {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.45rem;
-    padding: 0.5rem 0.65rem;
-    border-radius: 14px;
+.card {
+    padding: 1.05rem 1.05rem 1.1rem;
+    background: var(--panel);
     border: 1px solid var(--border2);
-    background: var(--btn);
-    color: var(--text);
-    transition: background 160ms ease;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
 }
 
-.socialLink:hover {
-    background: var(--btnHover);
+.card h3 {
+    margin: 0 0 0.45rem;
+    font-size: 1.05rem;
+    letter-spacing: -0.15px;
 }
 
-.socialLabel {
-    font-size: 0.92rem;
+.card p {
+    margin: 0;
     color: var(--muted);
+    line-height: 1.65;
 }
 
-/* -----------------------------
+/* =========================
+   CTA
+========================= */
+.section.cta {
+    border: 1px solid var(--border2);
+    background: var(--panel2);
+    border-radius: var(--radius);
+    padding: 1.6rem;
+    box-shadow: var(--shadow);
+    text-align: center;
+}
+
+.section.cta h2 {
+    margin: 0 0 0.55rem;
+    font-size: 1.65rem;
+    letter-spacing: -0.25px;
+}
+
+.section.cta p {
+    margin: 0 auto 1rem;
+    max-width: 72ch;
+    color: var(--muted);
+    line-height: 1.65;
+}
+
+.btn.large {
+    padding: 0.9rem 1.25rem;
+    border-radius: 16px;
+    font-size: 1rem;
+}
+
+/* =========================
    Responsive
------------------------------- */
+========================= */
 @media (max-width: 980px) {
-    .footerWrap {
+    .hero {
+        min-height: clamp(540px, 70vh, 760px);
+        padding: 4rem 1rem 3rem;
+    }
+
+    .cardGrid {
         grid-template-columns: 1fr;
-    }
-
-    .footerRight {
-        justify-items: start;
-    }
-
-    .socialRow {
-        justify-content: flex-start;
     }
 }
 
 @media (max-width: 720px) {
-    .navToggle {
-        display: inline-flex;
+    .heroContent {
+        padding: 1rem 0.8rem 1.15rem;
     }
 
-    .navLinks {
-        position: absolute;
-        right: 0;
-        top: 62px;
-        width: min(320px, calc(100vw - 2rem));
-        display: none;
-        flex-direction: column;
-        gap: 0.25rem;
-        padding: 0.7rem;
-        border-radius: var(--radius);
-        border: 1px solid var(--border2);
-        background: color-mix(in srgb, var(--bg) 75%, transparent);
-        box-shadow: var(--shadow);
+    .heroLogo {
+        width: 64px;
+        height: 64px;
+        border-radius: 16px;
     }
 
-    .navLinks.open {
-        display: flex;
+    .heroSubtitle {
+        font-size: 1rem;
     }
 
-    .iconBtnLabel {
-        display: none;
+    .heroActions {
+        gap: 0.6rem;
+    }
+
+    /* Mobile: keep buttons large, but prevent awkward full-width on ghost in some layouts */
+    .heroActions .btn {
+        width: 100%;
+        max-width: 420px;
     }
 }
