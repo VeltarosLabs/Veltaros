@@ -10,7 +10,8 @@ type Props = {
 
 const navLinks = [
     { to: "/", label: "Home" },
-    { to: "/wallet", label: "Wallet" }
+    { to: "/wallet", label: "Wallet" },
+    { to: "/explorer", label: "Explorer" }
 ];
 
 export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElement {
@@ -19,12 +20,10 @@ export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElem
     const menuRef = useRef<HTMLElement | null>(null);
     const toggleRef = useRef<HTMLButtonElement | null>(null);
 
-    // Close menu on route change
     useEffect(() => {
         setOpen(false);
     }, [loc.pathname]);
 
-    // Scroll lock while menu is open (mobile)
     useEffect(() => {
         if (!open) {
             document.body.classList.remove("noScroll");
@@ -34,7 +33,6 @@ export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElem
         return () => document.body.classList.remove("noScroll");
     }, [open]);
 
-    // Close menu when clicking outside
     useEffect(() => {
         if (!open) return;
 
@@ -59,7 +57,6 @@ export default function Navbar({ theme, onToggleTheme }: Props): React.ReactElem
         };
     }, [open]);
 
-    // Close menu on Escape
     useEffect(() => {
         if (!open) return;
 

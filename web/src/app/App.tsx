@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Navbar from "../components/Navbar";
 import Landing from "../pages/Landing";
 import Wallet from "../pages/Wallet";
+import Explorer from "../pages/Explorer";
 import SocialLinks from "../components/SocialLinks";
 import { useTheme } from "../hooks/useTheme";
 import logoPng from "../assets/logo.png";
@@ -22,6 +23,7 @@ export default function App(): React.ReactElement {
                 <Routes>
                     <Route path="/" element={<Landing />} />
                     <Route path="/wallet" element={<Wallet />} />
+                    <Route path="/explorer" element={<Explorer />} />
                     <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
             </main>
