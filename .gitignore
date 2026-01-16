@@ -76,3 +76,5 @@ web/.vercel/
 web/.cache/
 web/.turbo/
 
+# Runtime node data
+data/node/*.json
