@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import logoPng from "../assets/logo.png";
 import heroImg from "../assets/hero.jpg";
 import "../styles/landing.css";
+import TipPreview from "../components/TipPreview";
 
 export default function Landing(): React.ReactElement {
     return (
@@ -64,36 +65,63 @@ export default function Landing(): React.ReactElement {
                 </div>
             </section>
 
-            {/* TECHNOLOGY */}
+            {/* NETWORK */}
             <section className="section alt">
                 <header className="sectionHeader">
-                    <h2>Technology</h2>
-                    <p>A full-stack blockchain system built with performance, clarity, and safety in mind.</p>
+                    <h2>Network</h2>
+                    <p>
+                        Observe the chain tip and explore recent blocks directly from your node.
+                    </p>
                 </header>
 
                 <div className="cardGrid">
                     <div className="card">
-                        <h3>Core Engine</h3>
+                        <h3>Explorer</h3>
                         <p>
-                            Implemented in Go for performance and concurrency. Includes networking, transaction validation, and state
-                            foundations.
+                            Review chain progress and open blocks to inspect headers and transactions.
                         </p>
+
+                        <div className="tipWrap">
+                            <TipPreview />
+                        </div>
+
+                        <div className="landingActions">
+                            <Link to="/explorer" className="btn small primary">
+                                Open Explorer
+                            </Link>
+                            <Link to="/wallet" className="btn small">
+                                Wallet
+                            </Link>
+                        </div>
                     </div>
 
                     <div className="card">
-                        <h3>Wallet Experience</h3>
+                        <h3>Transactions</h3>
                         <p>
-                            A modern interface designed for desktop and mobile. Local encrypted vault, address tools, and clean send
-                            flows.
+                            Draft, sign, and broadcast transactions with nonce protection and balance checks.
                         </p>
+
+                        <div className="landingActions">
+                            <Link to="/wallet" className="btn small primary">
+                                Send
+                            </Link>
+                            <Link to="/wallet" className="btn small">
+                                Receive
+                            </Link>
+                        </div>
                     </div>
 
                     <div className="card">
-                        <h3>Network Visibility</h3>
+                        <h3>Node Status</h3>
                         <p>
-                            View peer connections and mempool activity clearly, with controls that stay readable in light and dark
-                            mode.
+                            View peer connectivity, mempool activity, and operational status in one place.
                         </p>
+
+                        <div className="landingActions">
+                            <Link to="/wallet" className="btn small primary">
+                                Open Network View
+                            </Link>
+                        </div>
                     </div>
                 </div>
             </section>

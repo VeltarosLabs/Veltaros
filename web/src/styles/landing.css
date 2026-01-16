@@ -286,3 +286,29 @@
         max-width: 420px;
     }
 }
+
+.tipWrap {
+    margin-top: 0.9rem;
+}
+
+.tipBox {
+    border: 1px solid var(--border2);
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius2);
+    padding: 0.75rem;
+    display: grid;
+    gap: 0.45rem;
+}
+
+.tipRow {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.landingActions {
+    margin-top: 0.9rem;
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
