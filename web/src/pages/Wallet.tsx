@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { env } from "../config/env";
-import { VeltarosApiClient, type TxBroadcastResponse, type TxValidateResponse } from "../api/client";
+import { VeltarosApiClient, type ProduceBlockResponse, type TxBroadcastResponse, type TxValidateResponse } from "../api/client";
 import type { NodeStatus, PeerList } from "../api/types";
 import type { MempoolResponse } from "../api/mempoolTypes";
 import type { AccountInfo } from "../api/accountTypes";
@@ -57,19 +57,15 @@ export default function Wallet(): React.ReactElement {
     const [busy, setBusy] = useState(false);
     const [notice, setNotice] = useState<string | null>(null);
 
-    // Account info
     const [account, setAccount] = useState<AccountInfo | null>(null);
     const [accountErr, setAccountErr] = useState<string | null>(null);
 
-    // Faucet (optional)
     const [faucetAvailable, setFaucetAvailable] = useState<boolean | null>(null);
     const [faucetAmount, setFaucetAmount] = useState("100000");
 
-    // Vault
     const [pwd, setPwd] = useState("");
     const [pwd2, setPwd2] = useState("");
 
-    // Tx
     const [txTo, setTxTo] = useState("");
     const [txAmount, setTxAmount] = useState("1000");
     const [txFee, setTxFee] = useState("10");
@@ -78,11 +74,9 @@ export default function Wallet(): React.ReactElement {
     const [signed, setSigned] = useState<SignedTx | null>(null);
     const [txResult, setTxResult] = useState<string | null>(null);
 
-    // Signing modal
     const [signOpen, setSignOpen] = useState(false);
     const [signPwd, setSignPwd] = useState("");
 
-    // History
     const [history, setHistory] = useState<TxHistoryItem[]>(() => loadHistory());
     const refreshHistory = () => setHistory(loadHistory());
 
@@ -94,7 +88,7 @@ export default function Wallet(): React.ReactElement {
 
     const show = (text: string) => {
         setNotice(text);
-        window.setTimeout(() => setNotice(null), 1800);
+        window.setTimeout(() => setNotice(null), 2200);
     };
 
     const fail = (e: unknown) => {
@@ -126,13 +120,10 @@ export default function Wallet(): React.ReactElement {
     };
 
     const detectFaucet = async () => {
-        // If node doesn't have faucet enabled, it returns 404.
-        // We detect once per unlock to decide whether to show the panel.
         if (wallet.status !== "unlocked") return;
 
         try {
             const res = await fetch(`${env.nodeApiBaseUrl.replace(/\/+$/, "")}/faucet`, { method: "GET" });
-            // Our node returns 404 for disabled faucet; if it exists, GET will be method not allowed (405) or similar.
             if (res.status === 404) setFaucetAvailable(false);
             else setFaucetAvailable(true);
         } catch {
@@ -292,7 +283,6 @@ export default function Wallet(): React.ReactElement {
 
         await refreshAccount();
 
-        // Balance guidance
         if (account && account.spendableBalance < amount) {
             setNotice(`Insufficient spendable balance. Spendable: ${fmtAmount(account.spendableBalance)}`);
             return;
@@ -387,11 +377,12 @@ export default function Wallet(): React.ReactElement {
                 return;
             }
 
-            if (typeof res.expectedNonce === "number") {
-                setTxNonce(String(res.expectedNonce));
-                setNotice(`${res.error}. Suggested nonce: ${res.expectedNonce}`);
+            if (typeof (res as any).expectedNonce === "number") {
+                const en = (res as any).expectedNonce as number;
+                setTxNonce(String(en));
+                setNotice(`${(res as any).error}. Suggested nonce: ${en}`);
             } else {
-                setNotice(res.error);
+                setNotice((res as any).error ?? "Broadcast failed");
             }
         } catch (e) {
             fail(e);
@@ -407,6 +398,27 @@ export default function Wallet(): React.ReactElement {
             show("History cleared");
         }
     };
+
+    const onProduceBlock = async () => {
+        setBusy(true);
+        setNotice(null);
+        try {
+            const res: ProduceBlockResponse = await api.produceBlock();
+            if ("ok" in res && res.ok) {
+                show(`Block produced. Applied: ${res.applied}, Failed: ${res.failed}`);
+                await refreshAccount();
+                // mempool poll will refresh automatically; this gives faster feedback
+                return;
+            }
+            setNotice(res.error || "Failed to produce block");
+        } catch (e) {
+            fail(e);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const devMode = Boolean((status.data as any)?.devMode);
 
     return (
         <section className="page">
@@ -485,7 +497,7 @@ export default function Wallet(): React.ReactElement {
 
                                 <div className="alertInline">
                                     <div className="walletSectionTitle">Account</div>
-                                    <p className="walletHint">Balances are local to the node’s current ledger state (early phase).</p>
+                                    <p className="walletHint">Confirmed and spendable balances update as transactions are confirmed.</p>
 
                                     {accountErr && <div className="muted">{accountErr}</div>}
 
@@ -502,10 +514,6 @@ export default function Wallet(): React.ReactElement {
                                             <div className="row">
                                                 <span>Spendable</span>
                                                 <span className="value mono">{fmtAmount(account.spendableBalance)}</span>
-                                            </div>
-                                            <div className="row">
-                                                <span>Last nonce</span>
-                                                <span className="value mono">{account.lastNonce}</span>
                                             </div>
                                             <div className="row">
                                                 <span>Expected nonce</span>
@@ -651,7 +659,17 @@ export default function Wallet(): React.ReactElement {
 
             {section === "network" && (
                 <div className="walletGrid spanAll">
-                    <Card title="Node" subtitle="Live node status from your running Veltaros node.">
+                    <Card
+                        title="Node"
+                        subtitle="Live node status from your running Veltaros node."
+                        actions={
+                            devMode ? (
+                                <button className="btn small primary" onClick={() => void onProduceBlock()} disabled={busy}>
+                                    Produce block
+                                </button>
+                            ) : null
+                        }
+                    >
                         {status.loading && <p className="muted">Loading…</p>}
                         {status.error && <p className="muted">{status.error}</p>}
 
@@ -679,6 +697,8 @@ export default function Wallet(): React.ReactElement {
                                 </div>
                             </div>
                         )}
+
+                        {!devMode && <p className="muted" style={{ marginTop: "0.75rem" }}>Dev mode is off.</p>}
                     </Card>
 
                     <Card title="Mempool" subtitle="Transactions accepted by the node.">

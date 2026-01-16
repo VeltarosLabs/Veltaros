@@ -37,6 +37,10 @@ export type TxBroadcastErr = {
 export type TxValidateResponse = TxValidateOk | TxValidateErr;
 export type TxBroadcastResponse = TxBroadcastOk | TxBroadcastErr;
 
+export type ProduceBlockResponse =
+    | { ok: true; applied: number; failed: number; height: number }
+    | { ok?: false; error: string };
+
 export class VeltarosApiError extends Error {
     public readonly status: number;
     public readonly url: string;
@@ -89,6 +93,10 @@ export class VeltarosApiClient {
 
     async txBroadcast(tx: SignedTx, signal?: AbortSignal): Promise<TxBroadcastResponse> {
         return this.postJson<TxBroadcastResponse>("/tx/broadcast", tx, signal, true);
+    }
+
+    async produceBlock(signal?: AbortSignal): Promise<ProduceBlockResponse> {
+        return this.postJson<ProduceBlockResponse>("/dev/produce-block", {}, signal, true);
     }
 
     private async getJson<T extends Json>(path: string, signal?: AbortSignal): Promise<T> {
