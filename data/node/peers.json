@@ -6,7 +6,7 @@
   },
   {
     "addr": "127.0.0.1:30304",
-    "seenAt": "2026-01-16T18:37:18.6774918Z",
+    "seenAt": "2026-01-16T18:43:53.8555006Z",
     "source": "bootstrap",
     "lastError": "dial tcp 127.0.0.1:30304: connectex: No connection could be made because the target machine actively refused it."
   }
