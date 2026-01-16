@@ -1,0 +1,10 @@
+[build]
+  base = "web"
+  command = "npm run build"
+  publish = "dist"
+
+# SPA routing for React Router
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
