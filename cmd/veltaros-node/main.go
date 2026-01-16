@@ -35,8 +35,7 @@ type nodeRuntime struct {
 	p2p       *p2p.Node
 	networkID string
 	apiCfg    config.APIConfig
-
-	devMode bool
+	devMode   bool
 }
 
 func main() {
@@ -66,8 +65,9 @@ func main() {
 		os.Exit(exitWithError(err))
 	}
 
-	chain := blockchain.New(cfg.Network.NonceStorePath)
+	chain := blockchain.New(cfg.Network.NonceStorePath, cfg.Network.BlockStorePath)
 	_ = chain.LoadNonceState()
+	_ = chain.LoadBlocks()
 
 	led := ledger.New(cfg.Ledger.StorePath)
 	_ = led.Load()
@@ -121,6 +121,7 @@ func main() {
 				return
 			case <-t.C:
 				_ = rt.chain.SaveNonceState()
+				_ = rt.chain.SaveBlocks()
 				_ = rt.ledger.Save()
 			}
 		}
@@ -131,6 +132,7 @@ func main() {
 		apiSrv = startAPI(log, cfg.API.ListenAddr, rt)
 		defer func() {
 			_ = rt.chain.SaveNonceState()
+			_ = rt.chain.SaveBlocks()
 			_ = rt.ledger.Save()
 			cctx, ccancel := context.WithTimeout(context.Background(), 8*time.Second)
 			defer ccancel()
@@ -140,6 +142,7 @@ func main() {
 
 	waitForShutdown(log)
 	_ = rt.chain.SaveNonceState()
+	_ = rt.chain.SaveBlocks()
 	_ = rt.ledger.Save()
 	log.Info("shutdown complete")
 }
@@ -157,6 +160,48 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 
 	mux.HandleFunc("/version", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, version.Get())
+	})
+
+	// Explorer basics
+	mux.HandleFunc("/tip", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"height":  rt.chain.Height(),
+			"tipHash": rt.chain.TipHashHex(),
+		})
+	})
+
+	mux.HandleFunc("/blocks", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		limit := 25
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count":  len(rt.chain.RecentBlocks(limit)),
+			"blocks": rt.chain.RecentBlocks(limit),
+		})
+	})
+
+	mux.HandleFunc("/block/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		h := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/block/"))
+		if h == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "hash required"})
+			return
+		}
+		b, ok := rt.chain.GetBlock(h)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, b)
 	})
 
 	mux.HandleFunc("/status", func(w http.ResponseWriter, _ *http.Request) {
@@ -191,7 +236,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		})
 	})
 
-	// /account/<address>
 	mux.HandleFunc("/account/", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
@@ -206,7 +250,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid address"})
 			return
 		}
-
 		writeJSON(w, http.StatusOK, map[string]any{
 			"address":          addr,
 			"lastNonce":        rt.chain.LastNonce(addr),
@@ -217,7 +260,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		})
 	})
 
-	// Faucet (optional)
 	mux.HandleFunc("/faucet", func(w http.ResponseWriter, r *http.Request) {
 		if !rt.apiCfg.FaucetEnabled {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
@@ -227,7 +269,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 			return
 		}
-
 		if rt.apiCfg.APIKey != "" {
 			got := strings.TrimSpace(r.Header.Get("X-API-Key"))
 			if got != strings.TrimSpace(rt.apiCfg.APIKey) {
@@ -235,13 +276,11 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 				return
 			}
 		}
-
 		body, err := readBodyLimited(r.Body, 64*1024)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
-
 		var req struct {
 			Address string `json:"address"`
 			Amount  uint64 `json:"amount"`
@@ -259,13 +298,11 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "amount must be > 0"})
 			return
 		}
-
 		if err := rt.ledger.FaucetCredit(req.Address, req.Amount); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
 		_ = rt.ledger.Save()
-
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":      true,
 			"address": req.Address,
@@ -274,7 +311,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		})
 	})
 
-	// Validate tx
 	mux.HandleFunc("/tx/validate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
@@ -284,28 +320,20 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate limited"})
 			return
 		}
-
 		tx, err := decodeSignedTx(r, rt.networkID)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-
 		if err := blockchain.ValidateSignedTx(tx); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-
 		required := tx.Draft.Amount
 		if rt.ledger.SpendableBalance(tx.Draft.From) < required {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"ok":        false,
-				"error":     "insufficient balance",
-				"spendable": rt.ledger.SpendableBalance(tx.Draft.From),
-			})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "insufficient balance"})
 			return
 		}
-
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":            true,
 			"txId":          tx.TxID,
@@ -317,7 +345,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		})
 	})
 
-	// Broadcast tx
 	mux.HandleFunc("/tx/broadcast", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
@@ -327,55 +354,36 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate limited"})
 			return
 		}
-
 		tx, err := decodeSignedTx(r, rt.networkID)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-
 		if err := blockchain.ValidateSignedTx(tx); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-
 		if rt.chain.MempoolHas(tx.TxID) {
 			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID, "note": "already in mempool"})
 			return
 		}
-
-		// Stage spend based on amount (fee handling later)
 		if err := rt.ledger.StageMempoolSpend(tx.Draft.From, tx.Draft.Amount); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"ok":        false,
-				"error":     err.Error(),
-				"spendable": rt.ledger.SpendableBalance(tx.Draft.From),
-			})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-
 		if !rt.chain.ReserveNonce(tx.Draft.From, tx.Draft.Nonce) {
-			writeJSON(w, http.StatusBadRequest, map[string]any{
-				"ok":            false,
-				"error":         "nonce too low (replay or out-of-order)",
-				"lastNonce":     rt.chain.LastNonce(tx.Draft.From),
-				"expectedNonce": rt.chain.ExpectedNonce(tx.Draft.From),
-			})
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "nonce too low"})
 			return
 		}
-
 		if err := rt.chain.MempoolAdd(tx); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
 			return
 		}
-
 		_ = rt.chain.SaveNonceState()
 		_ = rt.ledger.Save()
-
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
 	})
 
-	// Dev-only: produce block (confirm mempool txs into balances)
 	mux.HandleFunc("/dev/produce-block", func(w http.ResponseWriter, r *http.Request) {
 		if !rt.devMode {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
@@ -385,7 +393,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
 			return
 		}
-
 		if rt.apiCfg.APIKey != "" {
 			got := strings.TrimSpace(r.Header.Get("X-API-Key"))
 			if got != strings.TrimSpace(rt.apiCfg.APIKey) {
@@ -394,10 +401,7 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			}
 		}
 
-		// Drain mempool
 		txs := rt.chain.MempoolDrain()
-
-		// Build real block
 		prev := rt.chain.TipHash()
 		blk, err := blockchain.BuildBlock(prev, txs)
 		if err != nil {
@@ -405,37 +409,36 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			return
 		}
 
-		// Apply confirmed txs
 		applied := 0
 		failed := 0
 		rt.ledger.ResetPending()
 
 		for _, tx := range txs {
-			err := rt.ledger.ApplyConfirmedTx(tx.Draft.From, tx.Draft.To, tx.Draft.Amount, tx.Draft.Fee)
-			if err != nil {
+			if err := rt.ledger.ApplyConfirmedTx(tx.Draft.From, tx.Draft.To, tx.Draft.Amount, tx.Draft.Fee); err != nil {
 				failed++
 				continue
 			}
 			applied++
 		}
 
-		if err := rt.chain.AddBlock(blk); err != nil {
+		sb, err := rt.chain.AddBlock(blk)
+		if err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
 			return
 		}
 
-		_ = rt.ledger.Save()
+		_ = rt.chain.SaveBlocks()
 		_ = rt.chain.SaveNonceState()
+		_ = rt.ledger.Save()
 
-		bh := blk.Header.Hash()
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":         true,
 			"applied":    applied,
 			"failed":     failed,
-			"height":     rt.chain.Height(),
-			"blockHash":  hex.EncodeToString(bh[:]),
-			"merkleRoot": hex.EncodeToString(blk.Header.MerkleRoot[:]),
-			"txCount":    len(blk.Transactions),
+			"height":     sb.Height,
+			"blockHash":  sb.HashHex,
+			"merkleRoot": sb.MerkleRoot,
+			"txCount":    sb.TxCount,
 		})
 	})
 

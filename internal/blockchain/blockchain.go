@@ -17,19 +17,26 @@ type Chain struct {
 
 	nonces     *NonceTracker
 	nonceStore *NonceStore
+
+	blockStorePath string
+	blocks         []StoredBlock
+	blocksByHash   map[string]StoredBlock
 }
 
-func New(nonceStorePath string) *Chain {
+func New(nonceStorePath string, blockStorePath string) *Chain {
 	g := NewGenesisBlock()
 	genHash := g.Header.Hash()
 
 	return &Chain{
-		genesis:    g,
-		height:     0,
-		tipHash:    genHash,
-		mempool:    make(map[string]SignedTx),
-		nonces:     NewNonceTracker(),
-		nonceStore: NewNonceStore(nonceStorePath),
+		genesis:        g,
+		height:         0,
+		tipHash:        genHash,
+		mempool:        make(map[string]SignedTx),
+		nonces:         NewNonceTracker(),
+		nonceStore:     NewNonceStore(nonceStorePath),
+		blockStorePath: blockStorePath,
+		blocks:         []StoredBlock{},
+		blocksByHash:   make(map[string]StoredBlock),
 	}
 }
 
@@ -52,18 +59,93 @@ func (c *Chain) TipHashHex() string {
 
 func (c *Chain) Genesis() Block { return c.genesis }
 
-func (c *Chain) AddBlock(b Block) error {
+func (c *Chain) AddBlock(b Block) (StoredBlock, error) {
 	if err := b.ValidateBasic(); err != nil {
-		return err
+		return StoredBlock{}, err
 	}
 
 	c.mu.Lock()
 	c.height++
 	c.tipHash = b.Header.Hash()
+
+	sb := MakeStoredBlock(c.height, b)
+	c.blocks = append(c.blocks, sb)
+	c.blocksByHash[sb.HashHex] = sb
 	c.mu.Unlock()
+
+	return sb, nil
+}
+
+// Block store persistence
+func (c *Chain) LoadBlocks() error {
+	store := NewBlockStore(c.blockStorePath)
+	blocks, err := store.Load()
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.blocks = blocks
+	c.blocksByHash = make(map[string]StoredBlock, len(blocks))
+	for _, b := range blocks {
+		c.blocksByHash[b.HashHex] = b
+	}
+
+	// If blocks exist, set height/tip based on last
+	if len(blocks) > 0 {
+		last := blocks[len(blocks)-1]
+		c.height = last.Height
+		if h, err := hex.DecodeString(last.HashHex); err == nil && len(h) == 32 {
+			copy(c.tipHash[:], h)
+		}
+	}
+
 	return nil
 }
 
+func (c *Chain) SaveBlocks() error {
+	c.mu.RLock()
+	blocks := make([]StoredBlock, len(c.blocks))
+	copy(blocks, c.blocks)
+	path := c.blockStorePath
+	c.mu.RUnlock()
+
+	store := NewBlockStore(path)
+	return store.Save(blocks)
+}
+
+func (c *Chain) RecentBlocks(limit int) []StoredBlock {
+	if limit <= 0 {
+		limit = 25
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if len(c.blocks) == 0 {
+		return []StoredBlock{}
+	}
+
+	if limit > len(c.blocks) {
+		limit = len(c.blocks)
+	}
+	out := make([]StoredBlock, 0, limit)
+	start := len(c.blocks) - limit
+	for i := start; i < len(c.blocks); i++ {
+		out = append(out, c.blocks[i])
+	}
+	return out
+}
+
+func (c *Chain) GetBlock(hashHex string) (StoredBlock, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	b, ok := c.blocksByHash[hashHex]
+	return b, ok
+}
+
+// Mempool
 func (c *Chain) MempoolAdd(tx SignedTx) error {
 	if err := ValidateSignedTx(tx); err != nil {
 		return err
@@ -98,8 +180,6 @@ func (c *Chain) MempoolCount() int {
 	return len(c.mempool)
 }
 
-// MempoolDrain returns all current mempool txs and clears the mempool.
-// Used by dev/testnet block production.
 func (c *Chain) MempoolDrain() []SignedTx {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -112,6 +192,7 @@ func (c *Chain) MempoolDrain() []SignedTx {
 	return out
 }
 
+// Nonces
 func (c *Chain) LastNonce(addr string) uint64 {
 	return c.nonces.Get(addr)
 }
