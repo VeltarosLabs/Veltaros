@@ -43,7 +43,7 @@ func (h BlockHeader) Hash() [32]byte {
 }
 
 func NewGenesisBlock() Block {
-	// Minimal deterministic genesis. We’ll formalize genesis parameters later.
+	// Minimal deterministic genesis.
 	now := time.Unix(0, 0).UTC()
 	return Block{
 		Header: BlockHeader{
@@ -51,20 +51,42 @@ func NewGenesisBlock() Block {
 			PrevHash:  [32]byte{},
 			Timestamp: now.Unix(),
 			Nonce:     0,
+			// MerkleRoot = zero for empty tx list
 		},
 		Transactions: []SignedTx{},
 	}
 }
 
+func BuildBlock(prevHash [32]byte, txs []SignedTx) (Block, error) {
+	txIDs := make([]string, 0, len(txs))
+	for _, tx := range txs {
+		if err := ValidateSignedTx(tx); err != nil {
+			return Block{}, err
+		}
+		txIDs = append(txIDs, tx.TxID)
+	}
+
+	root, err := MerkleRootFromTxIDs(txIDs)
+	if err != nil {
+		return Block{}, err
+	}
+
+	now := time.Now().UTC().Unix()
+	return Block{
+		Header: BlockHeader{
+			Version:    1,
+			PrevHash:   prevHash,
+			MerkleRoot: root,
+			Timestamp:  now,
+			Nonce:      0,
+		},
+		Transactions: txs,
+	}, nil
+}
+
 func (b *Block) ValidateBasic() error {
 	if b.Header.Timestamp <= 0 {
 		return errors.New("block timestamp must be set")
-	}
-
-	// MerkleRoot computation will be added when we finalize tx merkle rules.
-	// For now, allow zero root for empty blocks.
-	if len(b.Transactions) == 0 {
-		return nil
 	}
 
 	// Basic per-tx validation
@@ -73,5 +95,19 @@ func (b *Block) ValidateBasic() error {
 			return err
 		}
 	}
+
+	// MerkleRoot consistency check
+	txIDs := make([]string, 0, len(b.Transactions))
+	for _, tx := range b.Transactions {
+		txIDs = append(txIDs, tx.TxID)
+	}
+	root, err := MerkleRootFromTxIDs(txIDs)
+	if err != nil {
+		return err
+	}
+	if root != b.Header.MerkleRoot {
+		return errors.New("merkle root mismatch")
+	}
+
 	return nil
 }

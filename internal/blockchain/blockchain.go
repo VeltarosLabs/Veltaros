@@ -1,15 +1,18 @@
 package blockchain
 
 import (
+	"encoding/hex"
 	"errors"
 	"sync"
 )
 
 type Chain struct {
+	mu sync.RWMutex
+
 	genesis Block
 	height  uint64
+	tipHash [32]byte
 
-	mu      sync.RWMutex
 	mempool map[string]SignedTx
 
 	nonces     *NonceTracker
@@ -18,22 +21,46 @@ type Chain struct {
 
 func New(nonceStorePath string) *Chain {
 	g := NewGenesisBlock()
-	c := &Chain{
+	genHash := g.Header.Hash()
+
+	return &Chain{
 		genesis:    g,
 		height:     0,
+		tipHash:    genHash,
 		mempool:    make(map[string]SignedTx),
 		nonces:     NewNonceTracker(),
 		nonceStore: NewNonceStore(nonceStorePath),
 	}
-	return c
 }
 
-func (c *Chain) Height() uint64 { return c.height }
+func (c *Chain) Height() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.height
+}
+
+func (c *Chain) TipHash() [32]byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.tipHash
+}
+
+func (c *Chain) TipHashHex() string {
+	h := c.TipHash()
+	return hex.EncodeToString(h[:])
+}
 
 func (c *Chain) Genesis() Block { return c.genesis }
 
-func (c *Chain) AddBlock(_ Block) error {
+func (c *Chain) AddBlock(b Block) error {
+	if err := b.ValidateBasic(); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
 	c.height++
+	c.tipHash = b.Header.Hash()
+	c.mu.Unlock()
 	return nil
 }
 

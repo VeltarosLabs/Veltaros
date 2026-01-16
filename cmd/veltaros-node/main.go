@@ -146,6 +146,7 @@ func main() {
 
 func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 	mux := http.NewServeMux()
+	txLimiter := api.NewLimiter(2.0, 10.0, 1.0)
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
@@ -166,8 +167,16 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			"peers":     rt.p2p.PeerCount(),
 			"height":    rt.chain.Height(),
 			"mempool":   rt.chain.MempoolCount(),
+			"tipHash":   rt.chain.TipHashHex(),
 			"dataDir":   rt.store.DataDir,
 			"devMode":   rt.devMode,
+		})
+	})
+
+	mux.HandleFunc("/peers", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"count": rt.p2p.PeerCount(),
+			"peers": rt.p2p.Peers(),
 		})
 	})
 
@@ -182,7 +191,191 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 		})
 	})
 
-	// Dev-only: produce block (confirm mempool)
+	// /account/<address>
+	mux.HandleFunc("/account/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		addr := strings.TrimSpace(strings.TrimPrefix(r.URL.Path, "/account/"))
+		if addr == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "address required"})
+			return
+		}
+		if err := blockchain.ValidateAddress(addr); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid address"})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"address":          addr,
+			"lastNonce":        rt.chain.LastNonce(addr),
+			"expectedNonce":    rt.chain.ExpectedNonce(addr),
+			"confirmedBalance": rt.ledger.ConfirmedBalance(addr),
+			"pendingOut":       rt.ledger.PendingOut(addr),
+			"spendableBalance": rt.ledger.SpendableBalance(addr),
+		})
+	})
+
+	// Faucet (optional)
+	mux.HandleFunc("/faucet", func(w http.ResponseWriter, r *http.Request) {
+		if !rt.apiCfg.FaucetEnabled {
+			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+
+		if rt.apiCfg.APIKey != "" {
+			got := strings.TrimSpace(r.Header.Get("X-API-Key"))
+			if got != strings.TrimSpace(rt.apiCfg.APIKey) {
+				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+				return
+			}
+		}
+
+		body, err := readBodyLimited(r.Body, 64*1024)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+
+		var req struct {
+			Address string `json:"address"`
+			Amount  uint64 `json:"amount"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid json"})
+			return
+		}
+		req.Address = strings.TrimSpace(req.Address)
+		if err := blockchain.ValidateAddress(req.Address); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid address"})
+			return
+		}
+		if req.Amount == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "amount must be > 0"})
+			return
+		}
+
+		if err := rt.ledger.FaucetCredit(req.Address, req.Amount); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+		_ = rt.ledger.Save()
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":      true,
+			"address": req.Address,
+			"amount":  req.Amount,
+			"balance": rt.ledger.ConfirmedBalance(req.Address),
+		})
+	})
+
+	// Validate tx
+	mux.HandleFunc("/tx/validate", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		if !txLimiter.Allow(r) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate limited"})
+			return
+		}
+
+		tx, err := decodeSignedTx(r, rt.networkID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		if err := blockchain.ValidateSignedTx(tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		required := tx.Draft.Amount
+		if rt.ledger.SpendableBalance(tx.Draft.From) < required {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":        false,
+				"error":     "insufficient balance",
+				"spendable": rt.ledger.SpendableBalance(tx.Draft.From),
+			})
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":            true,
+			"txId":          tx.TxID,
+			"from":          tx.Draft.From,
+			"lastNonce":     rt.chain.LastNonce(tx.Draft.From),
+			"expectedNonce": rt.chain.ExpectedNonce(tx.Draft.From),
+			"mempoolHas":    rt.chain.MempoolHas(tx.TxID),
+			"spendable":     rt.ledger.SpendableBalance(tx.Draft.From),
+		})
+	})
+
+	// Broadcast tx
+	mux.HandleFunc("/tx/broadcast", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{"error": "method not allowed"})
+			return
+		}
+		if !txLimiter.Allow(r) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"ok": false, "error": "rate limited"})
+			return
+		}
+
+		tx, err := decodeSignedTx(r, rt.networkID)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		if err := blockchain.ValidateSignedTx(tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		if rt.chain.MempoolHas(tx.TxID) {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID, "note": "already in mempool"})
+			return
+		}
+
+		// Stage spend based on amount (fee handling later)
+		if err := rt.ledger.StageMempoolSpend(tx.Draft.From, tx.Draft.Amount); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":        false,
+				"error":     err.Error(),
+				"spendable": rt.ledger.SpendableBalance(tx.Draft.From),
+			})
+			return
+		}
+
+		if !rt.chain.ReserveNonce(tx.Draft.From, tx.Draft.Nonce) {
+			writeJSON(w, http.StatusBadRequest, map[string]any{
+				"ok":            false,
+				"error":         "nonce too low (replay or out-of-order)",
+				"lastNonce":     rt.chain.LastNonce(tx.Draft.From),
+				"expectedNonce": rt.chain.ExpectedNonce(tx.Draft.From),
+			})
+			return
+		}
+
+		if err := rt.chain.MempoolAdd(tx); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+
+		_ = rt.chain.SaveNonceState()
+		_ = rt.ledger.Save()
+
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "txId": tx.TxID})
+	})
+
+	// Dev-only: produce block (confirm mempool txs into balances)
 	mux.HandleFunc("/dev/produce-block", func(w http.ResponseWriter, r *http.Request) {
 		if !rt.devMode {
 			writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
@@ -193,7 +386,6 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			return
 		}
 
-		// optional: require API key if configured
 		if rt.apiCfg.APIKey != "" {
 			got := strings.TrimSpace(r.Header.Get("X-API-Key"))
 			if got != strings.TrimSpace(rt.apiCfg.APIKey) {
@@ -202,16 +394,23 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			}
 		}
 
-		// Drain mempool and apply
+		// Drain mempool
 		txs := rt.chain.MempoolDrain()
+
+		// Build real block
+		prev := rt.chain.TipHash()
+		blk, err := blockchain.BuildBlock(prev, txs)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
+
+		// Apply confirmed txs
 		applied := 0
 		failed := 0
-
-		// clear pending and rebuild from scratch
 		rt.ledger.ResetPending()
 
 		for _, tx := range txs {
-			// tx already validated at entry time; if ledger apply fails, count it
 			err := rt.ledger.ApplyConfirmedTx(tx.Draft.From, tx.Draft.To, tx.Draft.Amount, tx.Draft.Fee)
 			if err != nil {
 				failed++
@@ -220,23 +419,25 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 			applied++
 		}
 
-		// Increment height once per produced block
-		_ = rt.chain.AddBlock(blockchain.Block{})
+		if err := rt.chain.AddBlock(blk); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+			return
+		}
 
 		_ = rt.ledger.Save()
 		_ = rt.chain.SaveNonceState()
 
+		bh := blk.Header.Hash()
 		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":      true,
-			"applied": applied,
-			"failed":  failed,
-			"height":  rt.chain.Height(),
+			"ok":         true,
+			"applied":    applied,
+			"failed":     failed,
+			"height":     rt.chain.Height(),
+			"blockHash":  hex.EncodeToString(bh[:]),
+			"merkleRoot": hex.EncodeToString(blk.Header.MerkleRoot[:]),
+			"txCount":    len(blk.Transactions),
 		})
 	})
-
-	// account + tx endpoints remain as before (omitted here for brevity in explanation)
-	// In your repo, keep your current implementations for /account, /tx/validate, /tx/broadcast and /faucet.
-	// If you already have them, do not delete them; just add this dev handler above and keep the rest unchanged.
 
 	secured := api.SecurityMiddleware(api.SecurityConfig{
 		AllowedOrigins: rt.apiCfg.AllowedOrigins,
@@ -265,6 +466,21 @@ func startAPI(log *slog.Logger, listen string, rt *nodeRuntime) *http.Server {
 	}()
 
 	return srv
+}
+
+func decodeSignedTx(r *http.Request, networkID string) (blockchain.SignedTx, error) {
+	body, err := readBodyLimited(r.Body, 256*1024)
+	if err != nil {
+		return blockchain.SignedTx{}, err
+	}
+	var tx blockchain.SignedTx
+	if err := json.Unmarshal(body, &tx); err != nil {
+		return blockchain.SignedTx{}, errors.New("invalid json")
+	}
+	if tx.Draft.NetworkID != networkID {
+		return blockchain.SignedTx{}, errors.New("networkId mismatch")
+	}
+	return tx, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
