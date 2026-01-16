@@ -5,6 +5,14 @@ export type TipInfo = {
     tipHash: string;
 };
 
+export type NodeStatusLite = {
+    devMode?: boolean;
+    height?: number;
+    mempool?: number;
+    tipHash?: string;
+    networkID?: string;
+};
+
 export type StoredBlockSummary = {
     hash: string;
     height: number;

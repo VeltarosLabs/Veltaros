@@ -3,12 +3,13 @@ import { env } from "../config/env";
 import Card from "../components/Card";
 import Modal from "../components/Modal";
 import { ExplorerClient } from "../api/explorerClient";
-import type { StoredBlock, StoredBlockSummary, TipInfo } from "../api/explorerTypes";
+import type { StoredBlock, StoredBlockSummary, TipInfo, NodeStatusLite } from "../api/explorerTypes";
 import BlockCard from "../components/explorer/BlockCard";
 import BlockDetails from "../components/explorer/BlockDetails";
 import "../styles/explorer.css";
 import { usePoll } from "../hooks/usePoll";
 import { copyText } from "../utils/clipboard";
+import { Link } from "react-router-dom";
 
 type LoadState<T> = { data: T | null; error: string | null; loading: boolean };
 
@@ -28,6 +29,14 @@ export default function Explorer(): React.ReactElement {
 
     const tip = usePoll<TipInfo>((signal) => explorer.tip(signal), 2500);
     const blocks = usePoll<{ count: number; blocks: StoredBlockSummary[] }>((signal) => explorer.blocks(signal), 3000);
+
+    // Pull /status lightly (we only care about devMode)
+    const statusLite = usePoll<NodeStatusLite>(async (signal) => {
+        const url = `${env.nodeApiBaseUrl.replace(/\/+$/, "")}/status`;
+        const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" }, signal });
+        if (!res.ok) throw new Error("Status unavailable");
+        return (await res.json()) as NodeStatusLite;
+    }, 3000);
 
     const openBlock = async (hash: string) => {
         const h = hash.trim();
@@ -73,6 +82,7 @@ export default function Explorer(): React.ReactElement {
     };
 
     const hasBlocks = Boolean(blocks.data && blocks.data.blocks && blocks.data.blocks.length > 0);
+    const devMode = Boolean(statusLite.data?.devMode);
 
     return (
         <section className="page">
@@ -86,6 +96,20 @@ export default function Explorer(): React.ReactElement {
             </div>
 
             {notice && <div className="alert">{notice}</div>}
+
+            {devMode && (
+                <div className="alert" style={{ marginBottom: "1rem" }}>
+                    <div style={{ fontWeight: 700, marginBottom: "0.25rem" }}>Dev tools</div>
+                    <div className="muted">
+                        Dev mode is enabled. You can produce blocks from the Wallet network view to confirm mempool transactions.
+                    </div>
+                    <div className="rowBtns">
+                        <Link to="/wallet" className="btn small primary">
+                            Go to Wallet
+                        </Link>
+                    </div>
+                </div>
+            )}
 
             <div className="explorerGrid">
                 <Card title="Tip" subtitle="Current chain tip reported by the node.">
@@ -118,12 +142,7 @@ export default function Explorer(): React.ReactElement {
                 <Card title="Search" subtitle="Paste a block hash to open details.">
                     <label className="label">
                         Block hash
-                        <input
-                            className="input mono"
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            placeholder="block hash"
-                        />
+                        <input className="input mono" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="block hash" />
                     </label>
 
                     <div className="rowBtns">
@@ -145,7 +164,7 @@ export default function Explorer(): React.ReactElement {
                     {!hasBlocks && (
                         <div className="explorerHint">
                             <p className="muted" style={{ margin: 0 }}>
-                                No blocks yet. In dev mode, produce a block to generate your first history.
+                                No blocks yet. Create a wallet, broadcast a transaction, then produce a block in dev mode.
                             </p>
                         </div>
                     )}
@@ -155,9 +174,7 @@ export default function Explorer(): React.ReactElement {
                     {blocks.loading && <p className="muted">Loading…</p>}
                     {blocks.error && <p className="muted">{blocks.error}</p>}
 
-                    {blocks.data && blocks.data.blocks.length === 0 && (
-                        <p className="muted">No blocks have been stored yet.</p>
-                    )}
+                    {blocks.data && blocks.data.blocks.length === 0 && <p className="muted">No blocks have been stored yet.</p>}
 
                     {blocks.data && blocks.data.blocks.length > 0 && (
                         <div className="explorerBlocks">
