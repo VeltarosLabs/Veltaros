@@ -4,7 +4,6 @@ import Card from "../components/Card";
 import Modal from "../components/Modal";
 import { ExplorerClient } from "../api/explorerClient";
 import type { StoredBlock, StoredBlockSummary, TipInfo, NodeStatusLite } from "../api/explorerTypes";
-import BlockCard from "../components/explorer/BlockCard";
 import BlockDetails from "../components/explorer/BlockDetails";
 import "../styles/explorer.css";
 import { usePoll } from "../hooks/usePoll";
@@ -19,6 +18,11 @@ function shortHash(h: string): string {
     return `${h.slice(0, 12)}…${h.slice(-8)}`;
 }
 
+function iso(ts: number): string {
+    const d = new Date(ts * 1000);
+    return isNaN(d.getTime()) ? "-" : d.toISOString();
+}
+
 export default function Explorer(): React.ReactElement {
     const explorer = useMemo(() => new ExplorerClient(env.nodeApiBaseUrl), []);
     const [openHash, setOpenHash] = useState<string | null>(null);
@@ -26,11 +30,11 @@ export default function Explorer(): React.ReactElement {
 
     const [search, setSearch] = useState("");
     const [notice, setNotice] = useState<string | null>(null);
+    const [visibleCount, setVisibleCount] = useState(25);
 
     const tip = usePoll<TipInfo>((signal) => explorer.tip(signal), 2500);
     const blocks = usePoll<{ count: number; blocks: StoredBlockSummary[] }>((signal) => explorer.blocks(signal), 3000);
 
-    // Pull /status lightly (we only care about devMode)
     const statusLite = usePoll<NodeStatusLite>(async (signal) => {
         const url = `${env.nodeApiBaseUrl.replace(/\/+$/, "")}/status`;
         const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" }, signal });
@@ -81,8 +85,9 @@ export default function Explorer(): React.ReactElement {
         await openBlock(q);
     };
 
-    const hasBlocks = Boolean(blocks.data && blocks.data.blocks && blocks.data.blocks.length > 0);
     const devMode = Boolean(statusLite.data?.devMode);
+    const allBlocks = blocks.data?.blocks ?? [];
+    const shownBlocks = allBlocks.slice(Math.max(0, allBlocks.length - visibleCount));
 
     return (
         <section className="page">
@@ -98,8 +103,8 @@ export default function Explorer(): React.ReactElement {
             {notice && <div className="alert">{notice}</div>}
 
             {devMode && (
-                <div className="alert" style={{ marginBottom: "1rem" }}>
-                    <div style={{ fontWeight: 700, marginBottom: "0.25rem" }}>Dev tools</div>
+                <div className="alert explorerDev">
+                    <div className="explorerDevTitle">Dev tools</div>
                     <div className="muted">
                         Dev mode is enabled. You can produce blocks from the Wallet network view to confirm mempool transactions.
                     </div>
@@ -149,19 +154,12 @@ export default function Explorer(): React.ReactElement {
                         <button className="btn primary" type="button" onClick={() => void onSearch()}>
                             Open block
                         </button>
-                        <button
-                            className="btn"
-                            type="button"
-                            onClick={() => {
-                                setSearch("");
-                                setNotice(null);
-                            }}
-                        >
+                        <button className="btn" type="button" onClick={() => setSearch("")}>
                             Clear
                         </button>
                     </div>
 
-                    {!hasBlocks && (
+                    {blocks.data && blocks.data.blocks.length === 0 && (
                         <div className="explorerHint">
                             <p className="muted" style={{ margin: 0 }}>
                                 No blocks yet. Create a wallet, broadcast a transaction, then produce a block in dev mode.
@@ -170,25 +168,58 @@ export default function Explorer(): React.ReactElement {
                     )}
                 </Card>
 
-                <Card title="Recent Blocks" subtitle="Click a block to view details.">
+                <Card title="Blocks" subtitle="Click a row to open details.">
                     {blocks.loading && <p className="muted">Loading…</p>}
                     {blocks.error && <p className="muted">{blocks.error}</p>}
 
                     {blocks.data && blocks.data.blocks.length === 0 && <p className="muted">No blocks have been stored yet.</p>}
 
                     {blocks.data && blocks.data.blocks.length > 0 && (
-                        <div className="explorerBlocks">
-                            {blocks.data.blocks.map((b) => (
-                                <div key={b.hash} className="explorerBlockWrap">
-                                    <BlockCard b={b} onOpen={openBlock} />
-                                    <div className="explorerBlockActions">
-                                        <button className="btn small" type="button" onClick={() => void onCopy(b.hash)}>
-                                            Copy hash
-                                        </button>
-                                    </div>
+                        <>
+                            <div className="explorerTableWrap">
+                                <table className="explorerTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Height</th>
+                                            <th>Hash</th>
+                                            <th>Tx</th>
+                                            <th>Time</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {shownBlocks
+                                            .slice()
+                                            .reverse()
+                                            .map((b) => (
+                                                <tr key={b.hash} className="explorerRowClickable" onClick={() => void openBlock(b.hash)}>
+                                                    <td className="mono">{b.height}</td>
+                                                    <td className="mono">{shortHash(b.hash)}</td>
+                                                    <td className="mono">{b.txCount}</td>
+                                                    <td className="mono tiny">{iso(b.timestamp)}</td>
+                                                    <td onClick={(e) => e.stopPropagation()}>
+                                                        <button className="btn small" type="button" onClick={() => void onCopy(b.hash)}>
+                                                            Copy
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="rowBtns" style={{ justifyContent: "space-between" }}>
+                                <div className="muted tiny">
+                                    Showing {Math.min(visibleCount, allBlocks.length)} of {allBlocks.length}
                                 </div>
-                            ))}
-                        </div>
+
+                                {visibleCount < allBlocks.length && (
+                                    <button className="btn small" type="button" onClick={() => setVisibleCount((n) => n + 25)}>
+                                        Load more
+                                    </button>
+                                )}
+                            </div>
+                        </>
                     )}
                 </Card>
             </div>
