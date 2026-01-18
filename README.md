@@ -3,31 +3,30 @@
 Veltaros is a decentralized digital currency and full-stack blockchain ecosystem.
 
 This repository contains:
-- A **Go core node** (P2P networking, identity handshake, peer discovery, transaction validation, mempool)
-- A **React web interface** (landing page + wallet UI with local encrypted vault, transaction signing, network views)
+- A Go-based node (P2P networking, identity handshake, peer discovery, transaction validation, mempool, block production in dev mode)
+- A React web interface (landing page, wallet UI, explorer)
 
-Veltaros is built with a production mindset: clean boundaries, strict validation, security-oriented defaults, and a structure designed to scale.
+Veltaros is built with a production mindset: clear architecture, strict validation, security-oriented defaults, and a structure designed to evolve into a complete blockchain network.
 
 ---
 
 ## Repository Structure
 
 - `cmd/`
-  - `veltaros-node/` — Node entry point (HTTP API, P2P, mempool, validation)
+  - `veltaros-node/` — Node entry point (HTTP API + P2P)
   - `veltaros-cli/` — CLI tooling
 - `internal/`
-  - `blockchain/` — Address rules, signed transactions, mempool, nonce policy (current phase)
-  - `p2p/` — Peer lifecycle, handshake, scoring, discovery, banlist + persistence
-  - `config/` — Node configuration + flags
-  - `logging/` — Structured logging
-  - `storage/` — Storage helpers (expanded in later phases)
-  - `api/` — Server utilities (rate limiting)
+  - `blockchain/` — blocks, merkle root, tx validation, nonce policy, block store (early stage)
+  - `ledger/` — balances + staged mempool spending (early stage)
+  - `p2p/` — peer handshake, discovery, scoring, banlist, persistence
+  - `config/` — flags + environment configuration
+  - `api/` — server utilities (rate limiting, security middleware)
+  - `logging/`, `storage/`, `crypto/`
 - `pkg/`
-  - `api/` — Go HTTP API client for node endpoints
-  - `types/` — Shared public types (reserved)
-  - `version/` — Build version info
+  - `api/` — Go client for node HTTP endpoints
+  - `version/`
 - `web/`
-  - React frontend (landing + wallet UI)
+  - React frontend (Landing + Wallet + Explorer)
 
 ---
 
@@ -35,42 +34,41 @@ Veltaros is built with a production mindset: clean boundaries, strict validation
 
 ### Node (Go)
 - P2P:
-  - identity-based HELLO handshake
-  - challenge-response verification
-  - peer discovery (GET_PEERS / PEERS)
-  - scoring + banlist persistence
-  - dial backoff + jitter
+  - identity HELLO + challenge-response verification
+  - peer discovery + dial backoff + banlist + peer store
+  - scoring + persistence
 - HTTP API:
   - `/healthz`, `/version`, `/status`, `/peers`
-  - `/mempool`
-  - `/tx/validate`
-  - `/tx/broadcast`
-- Transaction rules (current phase):
-  - signed tx draft format (Ed25519)
-  - strict address checksum validation
-  - signer public key must match `draft.from`
-  - per-address nonce tracking to prevent replay
+  - `/mempool`, `/account/<address>`
+  - `/tx/validate`, `/tx/broadcast`
+  - `/tip`, `/blocks`, `/block/<hash>` (explorer endpoints)
+- Security:
+  - CORS allowlist
+  - optional API key for tx endpoints
+  - rate limiting on transaction routes
+- Ledger (early stage):
+  - confirmed balances persisted to disk
+  - spendable balance uses staged mempool spending
+- Dev mode:
+  - `/dev/produce-block` confirms mempool txs into blocks (dev only)
 
 ### Web (React)
-- Landing page:
-  - light/dark theme toggle
-  - responsive hero + clean sections
-- Wallet UI:
-  - encrypted local vault (PBKDF2 + AES-GCM)
-  - receive address with copy
-  - transaction drafting + signing modal
-  - local tx history
-  - node status + peers + mempool views
-  - responsive layout (mobile/tablet/desktop)
+- Dark/Light theme toggle
+- Landing page with hero wallpaper and clean cards
+- Wallet:
+  - local encrypted vault (PBKDF2 + AES-GCM)
+  - receive address + copy
+  - send flow with signing modal
+  - nonce + balance display (from node account endpoint)
+  - optional faucet support (appears only if node enables it)
+- Explorer:
+  - tip + recent blocks
+  - block details modal
+  - transaction lookup inside recent blocks
 
 ---
 
 ## Run Locally
-
-### Requirements
-- Go
-- Node.js + npm
-- Git
 
 ### Node
 From repository root:
